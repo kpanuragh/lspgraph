@@ -33,6 +33,11 @@ impl Engine {
         &self.graph
     }
 
+    /// Borrow the underlying server, for capabilities the engine does not wrap.
+    pub fn server(&self) -> &LanguageServer {
+        &self.server
+    }
+
     /// Shut the language server down, consuming the engine.
     ///
     /// Without this, `LanguageServer::shutdown` is unreachable for anything

@@ -138,6 +138,13 @@ mod tests {
     }
 }
 
+/// The `SymbolKind` this crate treats as a plain function. Exposed so
+/// downstream crates can build `SymbolMatch` values in tests without
+/// depending on `lsp-types` directly.
+pub fn function_kind() -> SymbolKind {
+    SymbolKind::FUNCTION
+}
+
 /// A symbol found by a repository-wide `workspace/symbol` search.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SymbolMatch {
