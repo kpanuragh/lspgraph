@@ -180,6 +180,17 @@ impl LanguageServer {
     /// Returns an empty vec when the server does not advertise the capability;
     /// callers must check `supports_workspace_symbol()` to tell that apart
     /// from a query that genuinely matched nothing.
+    ///
+    /// Some servers (vtsls, observed) only return results for files that
+    /// have already been opened with `textDocument/didOpen`; rust-analyzer
+    /// and basedpyright do not have this requirement. On a server that does,
+    /// an empty result means "nothing matched among the files opened so
+    /// far", not "nothing matched in the repository". This function
+    /// deliberately does not open files itself to get around that: doing so
+    /// would force every search to pay for a full enumeration, which is
+    /// exactly the cost `workspace/symbol` was added to avoid. A caller that
+    /// wants repository-wide coverage on such a server must open the files
+    /// it cares about before searching.
     pub fn workspace_symbols(&self, query: &str) -> Result<Vec<SymbolMatch>> {
         if !self.supports_workspace_symbol {
             return Ok(Vec::new());

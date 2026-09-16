@@ -59,6 +59,19 @@ result list in that case, because "this server cannot search" and "your query
 matched nothing" would then look identical — the same class of
 indistinguishable-failure problem the engine spec's §5.2 exists to prevent.
 
+There is a second, narrower version of the same problem, measured against a
+live server rather than inferred: vtsls only returns `workspace/symbol`
+matches for files that have already been opened with `textDocument/didOpen`;
+rust-analyzer and basedpyright do not require this. `workspace_symbols`
+deliberately does not open files itself to compensate, since that would make
+every search pay for a full enumeration — precisely the cost `workspace/symbol`
+exists to avoid — so on a server with this dependency an empty result means
+"nothing matched among the files opened so far," not "nothing matched in the
+repository." A search view built on top of this must not present an empty
+result as authoritative on such a server; it needs its own signal (e.g. noting
+how much of the repository is actually covered) rather than rendering the
+empty list as if it were conclusive.
+
 ## 3. Threading
 
 The engine runs on a worker thread. The UI thread owns no `Engine` and never
