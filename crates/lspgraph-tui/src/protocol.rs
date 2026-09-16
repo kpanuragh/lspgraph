@@ -29,6 +29,9 @@ pub enum Event {
     Expanded(NodeId, Expansion),
     /// A per-node failure. The session continues.
     Failed(NodeId, String),
+    /// A recoverable failure with no particular node to blame — a failed
+    /// search, or a failed seed. The session continues.
+    Warning(String),
     /// The session cannot continue.
     Fatal(String),
 }

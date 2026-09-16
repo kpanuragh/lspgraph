@@ -56,7 +56,7 @@ pub fn spawn_worker(
                         let _ = tx.send(Event::Matches(ms));
                     }
                     Err(e) => {
-                        let _ = tx.send(Event::Fatal(e.to_string()));
+                        let _ = tx.send(Event::Warning(e.to_string()));
                     }
                 },
                 Request::Seed(m) => match engine.seed(&m) {
@@ -64,7 +64,7 @@ pub fn spawn_worker(
                         let _ = tx.send(Event::Seeded(id));
                     }
                     Err(e) => {
-                        let _ = tx.send(Event::Fatal(e.to_string()));
+                        let _ = tx.send(Event::Warning(e.to_string()));
                     }
                 },
                 Request::Expand(id) => match engine.expand(&id) {
@@ -93,6 +93,7 @@ mod tests {
     struct Stub {
         can_search: bool,
         fail_expand: bool,
+        fail_search: bool,
         shutdown_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     }
 
@@ -106,6 +107,9 @@ mod tests {
         }
         fn search(&mut self, query: &str) -> Result<Vec<SymbolMatch>> {
             let _ = query;
+            if self.fail_search {
+                return Err(lspgraph_core::Error::Protocol("nope".into()));
+            }
             Ok(Vec::new())
         }
         fn seed(&mut self, m: &SymbolMatch) -> Result<Option<NodeId>> {
@@ -190,6 +194,28 @@ mod tests {
         }))
         .unwrap();
         assert!(matches!(recv(&erx), Event::Seeded(Some(_))));
+        qtx.send(Request::Shutdown).unwrap();
+        h.join().unwrap();
+    }
+
+    #[test]
+    fn a_failed_search_warns_rather_than_killing_the_session() {
+        let (qtx, qrx) = channel();
+        let (etx, erx) = channel();
+        let h = spawn_worker(
+            Box::new(Stub { fail_search: true, ..Default::default() }),
+            qrx,
+            etx,
+        );
+        let _ = recv(&erx); // Ready
+        qtx.send(Request::Search("f".into())).unwrap();
+        match recv(&erx) {
+            Event::Warning(_) => {}
+            other => panic!("expected Warning, got {other:?}"),
+        }
+        // Still alive: a second request is still served.
+        qtx.send(Request::Expand(id("f"))).unwrap();
+        assert!(matches!(recv(&erx), Event::Expanded(_, _)));
         qtx.send(Request::Shutdown).unwrap();
         h.join().unwrap();
     }
