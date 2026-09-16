@@ -168,8 +168,11 @@ In zod's source this noise was 74% of all enumerated "functions". Filtering to
 entries whose name is a plain identifier took the resolve rate from 14% to 70%
 and warm throughput from 7.5 to 23.3 symbols/second.
 
-v0.1 filter: symbol kind is Function (12) or Method (6), and the name matches
-`^[A-Za-z_$][A-Za-z0-9_$]*$`.
+v0.1 filter: symbol kind is Function (12) or Method (6), and the name is a valid
+identifier — first character alphabetic (Unicode) or `_` or `$`, remaining characters
+alphanumeric (Unicode) or `_` or `$`. An ASCII-only predicate would silently drop
+Unicode-named functions (e.g. `validar_configuración`, `日本語関数`), contradicting §5.5's
+requirement that excluded symbols are shown rather than dropped.
 
 ### 5.4 Symbol identity
 

@@ -13,7 +13,9 @@ pub struct NamedCallable {
     pub position: Position,
 }
 
-/// Spec 5.3: kind is Function or Method, and the name is a plain identifier.
+/// Spec 5.3: kind is Function or Method, and the name is a valid identifier.
+/// First character must be alphabetic (Unicode), underscore, or dollar sign.
+/// Remaining characters must be alphanumeric (Unicode), underscore, or dollar sign.
 pub fn is_named_callable(name: &str, kind: SymbolKind) -> bool {
     if kind != SymbolKind::FUNCTION && kind != SymbolKind::METHOD {
         return false;
@@ -22,10 +24,10 @@ pub fn is_named_callable(name: &str, kind: SymbolKind) -> bool {
     let Some(first) = chars.next() else {
         return false;
     };
-    if !(first.is_ascii_alphabetic() || first == '_' || first == '$') {
+    if !(first.is_alphabetic() || first == '_' || first == '$') {
         return false;
     }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+    chars.all(|c| c.is_alphanumeric() || c == '_' || c == '$')
 }
 
 pub fn collect_named_callables(
@@ -89,6 +91,13 @@ mod tests {
     fn rejects_empty_and_leading_digit() {
         assert!(!is_named_callable("", SymbolKind::FUNCTION));
         assert!(!is_named_callable("2fast", SymbolKind::FUNCTION));
+    }
+
+    #[test]
+    fn accepts_unicode_identifiers() {
+        for n in ["validar_configuración", "Añadir", "日本語関数", "переменная"] {
+            assert!(is_named_callable(n, SymbolKind::FUNCTION), "should accept {n}");
+        }
     }
 
     #[allow(deprecated)]
