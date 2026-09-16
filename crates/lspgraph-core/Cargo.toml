@@ -1,0 +1,16 @@
+[package]
+name = "lspgraph-core"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Lazily explore a codebase's call graph through any LSP server"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "1"
+lsp-types = "0.95"
+dirs = "5"
+sha2 = "0.10"
