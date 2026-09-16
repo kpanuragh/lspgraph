@@ -2,6 +2,7 @@
 
 pub mod error;
 pub mod config;
+pub mod server;
 pub mod transport;
 
 pub use error::{Error, Result};
