@@ -24,19 +24,51 @@ pub struct LanguageServer {
     child: Child,
 }
 
+/// Owns a spawned child for the duration of `start`. If `start` returns
+/// early for any reason (an early `?`, the capability gate, or anything
+/// added later), `Drop` kills and reaps the process so a rejected or
+/// failed-to-initialize server is never leaked. The success path calls
+/// `disarm` to take the `Child` back out without killing it.
+struct ChildGuard(Option<Child>);
+
+impl ChildGuard {
+    fn new(child: Child) -> ChildGuard {
+        ChildGuard(Some(child))
+    }
+
+    fn child_mut(&mut self) -> &mut Child {
+        self.0.as_mut().expect("child present while guard is armed")
+    }
+
+    /// Take the child out without killing it. Used only on the success path.
+    fn disarm(mut self) -> Child {
+        self.0.take().expect("child present while guard is armed")
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 impl LanguageServer {
     pub fn start(name: &str, cfg: &ServerConfig, root: &Path) -> Result<LanguageServer> {
         let (prog, args) = cfg.command();
-        let mut child = Command::new(&prog)
+        let child = Command::new(&prog)
             .args(&args)
             .current_dir(root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()?;
+        let mut guard = ChildGuard::new(child);
 
-        let stdout = child.stdout.take().ok_or(Error::ServerExited)?;
-        let stdin = child.stdin.take().ok_or(Error::ServerExited)?;
+        let stdout = guard.child_mut().stdout.take().ok_or(Error::ServerExited)?;
+        let stdin = guard.child_mut().stdin.take().ok_or(Error::ServerExited)?;
         let conn = Connection::new(stdout, stdin);
 
         let root_uri = path_to_uri(root);
@@ -64,12 +96,12 @@ impl LanguageServer {
             .map(|v| v != &Value::Bool(false) && !v.is_null())
             .unwrap_or(false);
         if !supported {
-            let _ = child.kill();
             return Err(Error::NoCallHierarchy { server: name.to_string() });
         }
 
         conn.notify("initialized", json!({}))?;
 
+        let child = guard.disarm();
         Ok(LanguageServer {
             name: name.to_string(),
             root: root.to_path_buf(),
@@ -187,5 +219,58 @@ mod tests {
     fn builds_a_file_uri() {
         let u = path_to_uri(Path::new("/tmp/x.rs"));
         assert_eq!(u.as_str(), "file:///tmp/x.rs");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_start_does_not_leak_the_child_process() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let pid = std::process::id();
+        let script_name = format!("lspgraph-fake-server-{pid}.sh");
+        let script_path = std::env::temp_dir().join(&script_name);
+
+        // `cat` echoes our framed `initialize` request back to us. The
+        // reader loop treats the echo (an id + method, no result/error) as a
+        // server-initiated request and auto-replies with a null result,
+        // which `cat` echoes again — this time it *is* a response, so it
+        // resolves our `initialize` call with `null` capabilities, failing
+        // the call-hierarchy gate quickly instead of timing out. If `start`
+        // did not kill the child, it would sit in `cat` (no EOF ever
+        // arrives) and then `sleep 300`.
+        std::fs::write(&script_path, "#!/bin/sh\ncat\nsleep 300\n").unwrap();
+        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let cfg = ServerConfig {
+            cmd: script_path.display().to_string(),
+            extensions: vec![],
+            ready_timeout_secs: 300,
+            concurrency: 1,
+        };
+        let root = std::env::temp_dir();
+
+        let result = LanguageServer::start("fake", &cfg, &root);
+        assert!(result.is_err(), "expected start to fail against the fake server");
+
+        // Poll briefly rather than asserting immediately, so the test isn't
+        // racing the kill/wait done by ChildGuard's Drop.
+        let mut still_running = true;
+        for _ in 0..20 {
+            let found = Command::new("pgrep")
+                .arg("-f")
+                .arg(&script_name)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if !found {
+                still_running = false;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        let _ = std::fs::remove_file(&script_path);
+
+        assert!(!still_running, "fake server process {script_name} was leaked");
     }
 }
