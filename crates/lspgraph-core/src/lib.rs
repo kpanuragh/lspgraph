@@ -4,5 +4,6 @@ pub mod error;
 pub mod config;
 pub mod server;
 pub mod transport;
+pub mod symbols;
 
 pub use error::{Error, Result};
