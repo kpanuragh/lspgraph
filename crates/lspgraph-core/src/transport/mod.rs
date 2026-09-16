@@ -18,6 +18,65 @@ pub struct Notification {
 
 type Pending = Arc<Mutex<HashMap<i64, Sender<Value>>>>;
 
+/// Drain `reader` and dispatch framed messages until EOF or an unrecoverable
+/// framing error. Returns in either case; the caller is responsible for
+/// clearing `pending` afterwards so in-flight requests unblock.
+fn read_loop(
+    reader: &mut (impl Read + ?Sized),
+    pending: &Pending,
+    writer: &Arc<Mutex<Box<dyn Write + Send>>>,
+    tx: &Sender<Notification>,
+) {
+    let mut dec = codec::Decoder::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let n = match reader.read(&mut chunk) {
+            Ok(0) | Err(_) => return,
+            Ok(n) => n,
+        };
+        dec.push(&chunk[..n]);
+        loop {
+            match dec.next_message() {
+                Ok(Some(body)) => {
+                    let msg: Value = match serde_json::from_slice(&body) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+                    let id = msg.get("id").and_then(|v| v.as_i64());
+                    let is_response = msg.get("result").is_some() || msg.get("error").is_some();
+
+                    if let (Some(id), true) = (id, is_response) {
+                        if let Some(sender) = pending.lock().unwrap().remove(&id) {
+                            let _ = sender.send(msg);
+                        }
+                    } else if let Some(method) = msg.get("method").and_then(|m| m.as_str()) {
+                        match id {
+                            // Server->client request: must be answered.
+                            Some(id) => {
+                                let reply = json!({"jsonrpc":"2.0","id":id,"result":Value::Null});
+                                let bytes = serde_json::to_vec(&reply).unwrap_or_default();
+                                let mut w = writer.lock().unwrap();
+                                let _ = w.write_all(&codec::encode(&bytes));
+                                let _ = w.flush();
+                            }
+                            None => {
+                                let _ = tx.send(Notification {
+                                    method: method.to_string(),
+                                    params: msg.get("params").cloned().unwrap_or(Value::Null),
+                                });
+                            }
+                        }
+                    }
+                }
+                Ok(None) => break,
+                // A server emitting an unparseable frame is not recoverable for
+                // this connection.
+                Err(_) => return,
+            }
+        }
+    }
+}
+
 pub struct Connection {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     pending: Pending,
@@ -37,58 +96,14 @@ impl Connection {
         let pending_r = pending.clone();
         let writer_r = writer.clone();
         std::thread::spawn(move || {
-            let mut dec = codec::Decoder::new();
-            let mut chunk = [0u8; 8192];
-            loop {
-                let n = match reader.read(&mut chunk) {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => n,
-                };
-                dec.push(&chunk[..n]);
-                loop {
-                    match dec.next_message() {
-                        Ok(Some(body)) => {
-                            let msg: Value = match serde_json::from_slice(&body) {
-                                Ok(v) => v,
-                                Err(_) => continue,
-                            };
-                            let id = msg.get("id").and_then(|v| v.as_i64());
-                            let is_response =
-                                msg.get("result").is_some() || msg.get("error").is_some();
-
-                            if let (Some(id), true) = (id, is_response) {
-                                if let Some(sender) = pending_r.lock().unwrap().remove(&id) {
-                                    let _ = sender.send(msg);
-                                }
-                            } else if let Some(method) =
-                                msg.get("method").and_then(|m| m.as_str())
-                            {
-                                match id {
-                                    // Server->client request: must be answered.
-                                    Some(id) => {
-                                        let reply = json!({"jsonrpc":"2.0","id":id,"result":Value::Null});
-                                        let bytes = serde_json::to_vec(&reply).unwrap_or_default();
-                                        let mut w = writer_r.lock().unwrap();
-                                        let _ = w.write_all(&codec::encode(&bytes));
-                                        let _ = w.flush();
-                                    }
-                                    None => {
-                                        let _ = tx.send(Notification {
-                                            method: method.to_string(),
-                                            params: msg.get("params").cloned().unwrap_or(Value::Null),
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                        Ok(None) => break,
-                        // A server emitting unparseable frames is not recoverable for
-                        // this connection. Breaking the outer read loop drops the
-                        // pending senders, so in-flight requests resolve to
-                        // Error::ServerExited rather than hanging.
-                        Err(_) => return,
-                    }
-                }
+            // `read_loop` has multiple early-return paths (EOF, an unparseable
+            // frame). Whichever way it exits, the pending map must be cleared
+            // afterwards so every blocked `request` call observes a dropped
+            // sender (`RecvTimeoutError::Disconnected` -> `Error::ServerExited`)
+            // immediately, instead of waiting out its full timeout.
+            read_loop(&mut reader, &pending_r, &writer_r, &tx);
+            if let Ok(mut p) = pending_r.lock() {
+                p.clear();
             }
         });
 
@@ -160,6 +175,24 @@ mod tests {
         Duplex { to_client: Cursor::new(bytes) }
     }
 
+    /// A reader whose `read` blocks on a channel, so a test controls exactly
+    /// when data arrives and when EOF happens: `Some(bytes)` yields data,
+    /// `None` (or the sender being dropped) reports EOF via `Ok(0)`.
+    struct BlockingReader(Receiver<Option<Vec<u8>>>);
+
+    impl Read for BlockingReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            match self.0.recv() {
+                Ok(Some(bytes)) => {
+                    let n = bytes.len().min(buf.len());
+                    buf[..n].copy_from_slice(&bytes[..n]);
+                    Ok(n)
+                }
+                Ok(None) | Err(_) => Ok(0),
+            }
+        }
+    }
+
     #[test]
     fn resolves_a_response_by_id() {
         let server = canned(&[json!({"jsonrpc":"2.0","id":1,"result":{"ok":true}})]);
@@ -190,10 +223,37 @@ mod tests {
 
     #[test]
     fn times_out_when_no_response_arrives() {
-        let server = canned(&[]);
-        let conn = Connection::new(server, Vec::new());
+        // The reader stays open (never EOFs) so the timeout path is exercised
+        // deterministically rather than racing a from-EOF `ServerExited`.
+        let (_data_tx, data_rx) = channel::<Option<Vec<u8>>>();
+        let conn = Connection::new(BlockingReader(data_rx), Vec::new());
         let err = conn.request("x", json!({}), Duration::from_millis(80)).unwrap_err();
         assert!(matches!(err, Error::Timeout { .. }));
+    }
+
+    #[test]
+    fn reader_death_resolves_inflight_requests_as_server_exited() {
+        let (data_tx, data_rx) = channel::<Option<Vec<u8>>>();
+        let conn = Connection::new(BlockingReader(data_rx), Vec::new());
+
+        // Trigger EOF (via a helper thread that only owns the data-channel
+        // sender, not the Connection) shortly after the request is issued.
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            let _ = data_tx.send(None);
+        });
+
+        let start = std::time::Instant::now();
+        let err = conn
+            .request("x", json!({}), Duration::from_secs(30))
+            .unwrap_err();
+        let elapsed = start.elapsed();
+
+        assert!(matches!(err, Error::ServerExited), "got {err:?}");
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "should fail fast on reader death, took {elapsed:?}"
+        );
     }
 
     #[test]
