@@ -68,6 +68,11 @@ pub fn save(repo: &Path, cache: &CacheFile) -> Result<()> {
 }
 
 /// Cached files whose content hash no longer matches what is on disk.
+///
+/// The returned strings are NOT filesystem paths: each is the file's URI in
+/// the same form as `NodeId.uri` (built via `crate::server::path_to_uri`),
+/// so the result can be passed directly, with no conversion, to
+/// `Engine::invalidate_file` / `CallGraph::remove_file`.
 pub fn stale_files(cache: &CacheFile, _repo: &Path) -> Vec<String> {
     cache
         .file_hashes
@@ -76,7 +81,7 @@ pub fn stale_files(cache: &CacheFile, _repo: &Path) -> Vec<String> {
             Ok(current) => &current != *cached,
             Err(_) => true, // unreadable or deleted counts as stale
         })
-        .map(|(path, _)| path.clone())
+        .map(|(path, _)| crate::server::path_to_uri(Path::new(path)).to_string())
         .collect()
 }
 
@@ -180,17 +185,73 @@ mod tests {
         assert!(stale_files(&cache, Path::new("/")).is_empty());
 
         std::fs::write(&f, "two").unwrap();
-        assert_eq!(stale_files(&cache, Path::new("/")).len(), 1);
+        let stale = stale_files(&cache, Path::new("/"));
+        assert_eq!(stale.len(), 1);
+        assert_eq!(stale[0], crate::server::path_to_uri(&f).to_string());
         std::fs::remove_file(&f).ok();
     }
 
     #[test]
     fn a_deleted_file_counts_as_stale() {
+        let path = "/definitely/not/here-lspgraph-cache-test.rs";
         let mut cache = CacheFile::new(CallGraph::new());
-        cache.file_hashes.insert(
-            "/definitely/not/here-lspgraph-cache-test.rs".to_string(),
-            "abc".to_string(),
+        cache
+            .file_hashes
+            .insert(path.to_string(), "abc".to_string());
+        let stale = stale_files(&cache, Path::new("/"));
+        assert_eq!(stale.len(), 1);
+        assert_eq!(
+            stale[0],
+            crate::server::path_to_uri(Path::new(path)).to_string()
         );
-        assert_eq!(stale_files(&cache, Path::new("/")).len(), 1);
+    }
+
+    #[test]
+    fn stale_files_output_can_invalidate_graph_nodes() {
+        let f =
+            std::env::temp_dir().join(format!("lspgraph-inv-{}-invalidate.rs", std::process::id()));
+        std::fs::write(&f, "one").unwrap();
+        let uri = crate::server::path_to_uri(&f).to_string();
+
+        let node_id = NodeId {
+            uri: uri.clone(),
+            line: 1,
+            character: 3,
+            name: "f".into(),
+        };
+        let mut graph = CallGraph::new();
+        graph.upsert(Node {
+            id: node_id.clone(),
+            kind_name: "Function".into(),
+            detail: None,
+            state: NodeState::Unexpanded,
+        });
+        graph.record_expansion(
+            &node_id,
+            &Expansion {
+                callers: vec![],
+                callees: vec![],
+            },
+        );
+        assert_eq!(graph.len(), 1);
+
+        let mut cache = CacheFile::new(graph);
+        cache
+            .file_hashes
+            .insert(f.to_string_lossy().to_string(), hash_file(&f).unwrap());
+
+        std::fs::write(&f, "two").unwrap(); // make it stale
+
+        let stale = stale_files(&cache, Path::new("/"));
+        assert_eq!(stale.len(), 1);
+
+        // No conversion: pass the stale_files output straight into
+        // CallGraph::remove_file, exactly as a real caller would.
+        cache.graph.remove_file(&stale[0]);
+
+        assert!(cache.graph.nodes_in_file(&uri).is_empty());
+        assert_eq!(cache.graph.len(), 0);
+
+        std::fs::remove_file(&f).ok();
     }
 }
