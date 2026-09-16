@@ -255,6 +255,53 @@ mod tests {
     }
 
     #[test]
+    fn remove_file_strips_dangling_references_from_surviving_nodes() {
+        // Spec 5.4's invalidation invariant: after a file is invalidated, no
+        // surviving node may still point at anything that used to live in it.
+        // The other removal tests only have nodes inside the removed file, so
+        // the `retain` loop never sees a survivor — this is the test that
+        // actually exercises it.
+        let mut g = CallGraph::new();
+
+        let mut survivor = node("h", 1);
+        survivor.id.uri = "file:///b.rs".into();
+        let survivor_id = survivor.id.clone();
+        g.upsert(survivor);
+
+        let mut bystander = node("k", 7);
+        bystander.id.uri = "file:///b.rs".into();
+        let bystander_id = bystander.id.clone();
+        g.upsert(bystander);
+
+        g.upsert(node("f", 1)); // in a.rs
+        g.upsert(node("g", 2)); // in a.rs
+
+        // The survivor is both called by and calls into the doomed file, and
+        // also has one edge to a node that will still be there afterwards.
+        g.record_expansion(
+            &survivor_id,
+            &Expansion {
+                callers: vec![id("f", 1)],
+                callees: vec![id("g", 2), bystander_id.clone()],
+            },
+        );
+
+        g.remove_file("file:///a.rs");
+
+        assert_eq!(g.len(), 2, "only the two b.rs nodes should survive");
+        assert_eq!(
+            g.callers_of(&survivor_id).unwrap(),
+            &[] as &[NodeId],
+            "dangling caller reference into the removed file survived"
+        );
+        assert_eq!(
+            g.callees_of(&survivor_id).unwrap(),
+            &[bystander_id],
+            "removal should strip only the references into the removed file"
+        );
+    }
+
+    #[test]
     fn unresolved_reason_is_human_readable() {
         let text = UnresolvedReason::NoCallHierarchyItem.to_string();
         assert!(text.contains("overload signature"));

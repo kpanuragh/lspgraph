@@ -11,18 +11,53 @@ every language with a language server is reachable.
 
 Early. `lspgraph-core` is the engine; the TUI is not written yet.
 
+Caching is **not yet wired up**. `lspgraph_core::cache` can serialize and
+restore a graph and is tested, but nothing calls it: every run starts cold.
+See that module's documentation for what a consumer has to do first.
+
 ## Server support
 
 Adding a language means adding a table to `servers.toml`. No code.
 
 | Server | Status |
 |--------|--------|
-| rust-analyzer | validated in CI |
-| vtsls | validated in CI |
-| basedpyright | validated in CI |
+| rust-analyzer | validated by integration tests against the real server |
+| vtsls | validated by integration tests against the real server |
+| basedpyright | validated by integration tests against the real server |
 | anything else implementing `callHierarchyProvider` | expected to work, untested |
 
 Servers listed as untested are untested. They are not claimed to be supported.
+
+The integration tests (`cargo test -p lspgraph-core --test integration_servers`)
+drive each of the three servers end to end, and skip the ones that are not
+installed on the machine running them. There is no CI pipeline yet, so the
+validation above is whatever was last run by hand.
+
+## Configuration
+
+`servers.toml` maps a language to the server that handles it:
+
+```toml
+[rust]
+cmd = "rust-analyzer"
+extensions = ["rs"]
+ready_timeout_secs = 300   # optional
+```
+
+| Key | Meaning |
+|-----|---------|
+| `cmd` | Full command line, split on whitespace. |
+| `extensions` | File extensions, without the leading dot. |
+| `ready_timeout_secs` | How long to wait for the server to become genuinely ready. Default 300. |
+| `concurrency` | **Reserved; nothing reads it yet.** Default 1. |
+
+`concurrency` is accepted so that configs written against it keep parsing, but
+no code consumes it: every crawl is serial today regardless of what you set.
+Bounded-concurrency pipelining is deliberately deferred until it has been
+measured — setting this will not make anything faster.
+
+To point at servers installed outside `PATH` without editing the committed
+file, set `LSPGRAPH_SERVERS_TOML` to an override file.
 
 ## Try it
 

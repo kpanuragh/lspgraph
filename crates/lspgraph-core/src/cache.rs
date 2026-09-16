@@ -1,4 +1,39 @@
 //! Cross-session cache. Never authoritative: a cold cache costs time only.
+//!
+//! # Not yet wired up
+//!
+//! **Nothing outside this module calls [`load`], [`save`] or [`stale_files`]
+//! today, and nothing ever inserts into [`CacheFile::file_hashes`].** The
+//! round-trip works and is tested, but `Engine` always starts from an empty
+//! [`CallGraph`], so spec 5.4's persistence is *not* delivered yet. Treat
+//! this module as a tested building block, not as a live feature; in
+//! particular `stale_files` currently always returns an empty vector, because
+//! the map it reads is always empty.
+//!
+//! A future consumer — realistically the TUI, which is the first thing with a
+//! reason to cache — must do two things, and the second is not optional:
+//!
+//! 1. **Populate `file_hashes` when caching.** One entry per file the graph
+//!    has nodes in, keyed by absolute path, valued by [`hash_file`]. Without
+//!    it, invalidation cannot notice that anything changed.
+//! 2. **Persist (or rebuild) `Engine`'s `NodeId -> CallHierarchyItem` map.**
+//!    `CallGraph` stores node identity, not the `CallHierarchyItem` that the
+//!    server needs to answer `callHierarchy/incomingCalls`. `Engine::expand`
+//!    returns an *empty* expansion for a node it has no item for, and an
+//!    empty expansion is indistinguishable from "this function calls
+//!    nothing". Restoring a graph without also restoring the items would
+//!    therefore turn a cache hit into a wrong answer — a correctness bug, not
+//!    a performance one. Either serialise the item map alongside the graph,
+//!    or re-resolve a restored node through `prepareCallHierarchy` on first
+//!    expansion.
+//!
+//! One more thing to fix at wiring time: [`cache_dir_for`] keys the cache
+//! directory on the first 64 bits of a SHA-256 of the repository path, and
+//! [`CacheFile`] stores no repository path to cross-check against. A
+//! collision would hand one repository another repository's graph, which
+//! breaches spec 5.4's "a cold cache only costs time, never correctness".
+//! Store the repository path in `CacheFile` and reject a load whose path does
+//! not match.
 
 use crate::error::Result;
 use crate::graph::CallGraph;
