@@ -159,6 +159,16 @@ impl From<&SymbolMatch> for NamedCallable {
     }
 }
 
+/// Some servers decorate callable names in `workspace/symbol` results:
+/// vtsls returns "middle()" where rust-analyzer returns "middle". Strip that
+/// decoration so the stored name matches what call hierarchy reports.
+///
+/// Deliberately only a TRAILING "()": `documentSymbol`'s synthesized callback
+/// names such as `expect() callback` do not end with it and must stay rejected.
+fn undecorate(name: &str) -> &str {
+    name.strip_suffix("()").unwrap_or(name)
+}
+
 /// Parse a `workspace/symbol` result, keeping only named callables.
 ///
 /// Servers return `SymbolInformation[]` (with `location.range`) or
@@ -170,7 +180,8 @@ pub fn parse_workspace_symbols(v: &serde_json::Value) -> Vec<SymbolMatch> {
     };
     arr.iter()
         .filter_map(|e| {
-            let name = e.get("name")?.as_str()?.to_string();
+            let raw_name = e.get("name")?.as_str()?;
+            let name = undecorate(raw_name).to_string();
             let kind_n = e.get("kind")?.as_u64()?;
             let kind = match kind_n {
                 6 => SymbolKind::METHOD,
@@ -250,6 +261,43 @@ mod workspace_symbol_tests {
     fn a_null_or_non_array_result_is_empty_not_a_panic() {
         assert!(parse_workspace_symbols(&serde_json::Value::Null).is_empty());
         assert!(parse_workspace_symbols(&json!({"unexpected": true})).is_empty());
+    }
+
+    #[test]
+    fn vtsls_decorated_names_are_accepted_and_normalized() {
+        let v = json!([
+          {"name":"middle()","kind":12,
+           "location":{"uri":"file:///r/src/mid.ts",
+                       "range":{"start":{"line":2,"character":0},
+                                "end":{"line":2,"character":6}}}}
+        ]);
+        let out = parse_workspace_symbols(&v);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "middle");
+    }
+
+    #[test]
+    fn a_decorated_name_still_rejects_callback_noise() {
+        let v = json!([
+          {"name":"expect() callback","kind":12,
+           "location":{"uri":"file:///r/src/t.ts",
+                       "range":{"start":{"line":4,"character":2},
+                                "end":{"line":4,"character":9}}}}
+        ]);
+        assert!(parse_workspace_symbols(&v).is_empty());
+    }
+
+    #[test]
+    fn undecorating_is_a_no_op_for_plain_names() {
+        let v = json!([
+          {"name":"middle","kind":12,
+           "location":{"uri":"file:///r/src/mid.rs",
+                       "range":{"start":{"line":2,"character":0},
+                                "end":{"line":2,"character":6}}}}
+        ]);
+        let out = parse_workspace_symbols(&v);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "middle");
     }
 
     #[test]
