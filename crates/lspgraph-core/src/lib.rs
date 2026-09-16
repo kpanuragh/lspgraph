@@ -1,5 +1,6 @@
 //! Lazily explore a codebase's call graph through any LSP server.
 
+pub mod cache;
 pub mod error;
 pub mod config;
 pub mod engine;
