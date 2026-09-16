@@ -1,1 +1,7 @@
 /target
+/servers.local.toml
+
+# The rust-fixture is its own detached cargo workspace (see its Cargo.toml),
+# so it gets its own build artifacts under this repo.
+crates/lspgraph-core/fixtures/rust-fixture/target
+crates/lspgraph-core/fixtures/rust-fixture/Cargo.lock

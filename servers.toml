@@ -1,0 +1,11 @@
+[rust]
+cmd = "rust-analyzer"
+extensions = ["rs"]
+
+[typescript]
+cmd = "vtsls --stdio"
+extensions = ["ts", "tsx"]
+
+[python]
+cmd = "basedpyright-langserver --stdio"
+extensions = ["py"]

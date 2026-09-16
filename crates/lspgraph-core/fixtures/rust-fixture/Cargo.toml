@@ -1,0 +1,10 @@
+[package]
+name = "rust-fixture"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+# Detach from the parent workspace: this fixture is a standalone project that
+# rust-analyzer must be able to load on its own.
+[workspace]
