@@ -2,6 +2,7 @@
 
 pub mod error;
 pub mod config;
+pub mod engine;
 pub mod graph;
 pub mod server;
 pub mod transport;
