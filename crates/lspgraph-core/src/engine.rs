@@ -5,7 +5,7 @@
 //! full crawl costs minutes. Sourcetrail had to precompute because it owned
 //! the index; an LSP client does not.
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::graph::{CallGraph, Expansion, Node, NodeId, NodeState, UnresolvedReason};
 use crate::server::LanguageServer;
 use crate::symbols::NamedCallable;
@@ -52,24 +52,41 @@ impl Engine {
             Ok(p) => p,
             Err(()) => return Ok(None),
         };
-        let items = self.server.prepare_call_hierarchy(&path, cand.position)?;
+
+        let unresolved_id = || NodeId {
+            uri: cand.uri.to_string(),
+            line: cand.position.line,
+            character: cand.position.character,
+            name: cand.name.clone(),
+        };
+
+        let items = match self.server.prepare_call_hierarchy(&path, cand.position) {
+            Ok(items) => items,
+            // Retries in `server.rs` are exhausted: the server kept saying
+            // ContentModified. Record it, do not drop it (spec 5.5) — this
+            // symbol may resolve on a later attempt.
+            Err(Error::ContentModified { .. }) => {
+                let id = unresolved_id();
+                self.graph.upsert(Node {
+                    id: id.clone(),
+                    kind_name: "Unknown".into(),
+                    detail: None,
+                    state: NodeState::Unresolved(UnresolvedReason::TransientContentModified),
+                });
+                return Ok(None);
+            }
+            Err(e) => return Err(e),
+        };
 
         let Some(item) = items.into_iter().next() else {
             // Spec 5.5: record it, do not drop it.
-            let id = NodeId {
-                uri: cand.uri.to_string(),
-                line: cand.position.line,
-                character: cand.position.character,
-                name: cand.name.clone(),
-            };
+            let id = unresolved_id();
             self.graph.upsert(Node {
                 id: id.clone(),
                 kind_name: "Unknown".into(),
                 detail: None,
                 state: NodeState::Unresolved(UnresolvedReason::NoCallHierarchyItem),
             });
-            self.graph
-                .set_state(&id, NodeState::Unresolved(UnresolvedReason::NoCallHierarchyItem));
             return Ok(None);
         };
 

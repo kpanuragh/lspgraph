@@ -121,6 +121,10 @@ impl Connection {
         match rx.recv_timeout(timeout) {
             Ok(m) => {
                 if let Some(e) = m.get("error") {
+                    let code = e.get("code").and_then(|v| v.as_i64());
+                    if code == Some(-32801) {
+                        return Err(Error::ContentModified { method: method.to_string() });
+                    }
                     let text = e.get("message").and_then(|v| v.as_str()).unwrap_or("unknown");
                     return Err(Error::Protocol(format!("{method}: {text}")));
                 }
@@ -209,6 +213,26 @@ mod tests {
         let conn = Connection::new(server, Vec::new());
         let err = conn.request("x", json!({}), Duration::from_secs(2)).unwrap_err();
         assert!(matches!(err, Error::Protocol(m) if m.contains("no such method")));
+    }
+
+    #[test]
+    fn content_modified_error_code_is_distinguished_from_protocol_errors() {
+        let server = canned(&[
+            json!({"jsonrpc":"2.0","id":1,"error":{"code":-32801,"message":"content modified"}}),
+        ]);
+        let conn = Connection::new(server, Vec::new());
+        let err = conn.request("x", json!({}), Duration::from_secs(2)).unwrap_err();
+        assert!(matches!(err, Error::ContentModified { method } if method == "x"));
+    }
+
+    #[test]
+    fn other_error_codes_still_surface_as_protocol_errors() {
+        let server = canned(&[
+            json!({"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"no such method"}}),
+        ]);
+        let conn = Connection::new(server, Vec::new());
+        let err = conn.request("x", json!({}), Duration::from_secs(2)).unwrap_err();
+        assert!(matches!(err, Error::Protocol(_)));
     }
 
     #[test]

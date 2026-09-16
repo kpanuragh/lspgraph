@@ -11,6 +11,9 @@ pub enum Error {
     #[error("protocol: {0}")]
     Protocol(String),
 
+    #[error("{method}: server reported content modified (transient)")]
+    ContentModified { method: String },
+
     #[error("config: {0}")]
     Config(String),
 

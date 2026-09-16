@@ -143,10 +143,9 @@ impl LanguageServer {
         path: &Path,
         pos: Position,
     ) -> Result<Vec<CallHierarchyItem>> {
-        let v = self.conn.request(
+        let v = self.request_retrying_content_modified(
             "textDocument/prepareCallHierarchy",
             json!({"textDocument": {"uri": path_to_uri(path)}, "position": pos}),
-            REQUEST_TIMEOUT,
         )?;
         if v.is_null() {
             return Ok(Vec::new());
@@ -155,21 +154,39 @@ impl LanguageServer {
     }
 
     pub fn incoming_calls(&self, item: &CallHierarchyItem) -> Result<Vec<CallHierarchyItem>> {
-        let v = self.conn.request(
+        let v = self.request_retrying_content_modified(
             "callHierarchy/incomingCalls",
             json!({"item": item}),
-            REQUEST_TIMEOUT,
         )?;
         Ok(unwrap_calls(v, "from"))
     }
 
     pub fn outgoing_calls(&self, item: &CallHierarchyItem) -> Result<Vec<CallHierarchyItem>> {
-        let v = self.conn.request(
+        let v = self.request_retrying_content_modified(
             "callHierarchy/outgoingCalls",
             json!({"item": item}),
-            REQUEST_TIMEOUT,
         )?;
         Ok(unwrap_calls(v, "to"))
+    }
+
+    /// The LSP spec defines error code -32801 (ContentModified) as transient
+    /// and explicitly sanctions the client reissuing the request, unlike
+    /// every other error code. Used only for the call-hierarchy requests,
+    /// which are the ones observed to receive it against a live server.
+    fn request_retrying_content_modified(&self, method: &str, params: Value) -> Result<Value> {
+        const MAX_ATTEMPTS: u32 = 3; // initial attempt + 2 retries
+        const RETRY_DELAY: Duration = Duration::from_millis(150);
+
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            match self.conn.request(method, params.clone(), REQUEST_TIMEOUT) {
+                Err(Error::ContentModified { .. }) if attempt < MAX_ATTEMPTS => {
+                    std::thread::sleep(RETRY_DELAY);
+                }
+                other => return other,
+            }
+        }
     }
 
     pub fn shutdown(mut self) -> Result<()> {

@@ -30,6 +30,8 @@ pub enum UnresolvedReason {
     /// prepareCallHierarchy returned nothing. Legitimate for overload
     /// signatures and arrow-function assignments (spec 5.5).
     NoCallHierarchyItem,
+    /// The server kept reporting ContentModified; the symbol may resolve later.
+    TransientContentModified,
 }
 
 impl fmt::Display for UnresolvedReason {
@@ -38,6 +40,10 @@ impl fmt::Display for UnresolvedReason {
             UnresolvedReason::NoCallHierarchyItem => write!(
                 f,
                 "no call hierarchy: likely an overload signature or an anonymous function"
+            ),
+            UnresolvedReason::TransientContentModified => write!(
+                f,
+                "server repeatedly reported content modified; the symbol may resolve on a later attempt"
             ),
         }
     }
@@ -252,6 +258,14 @@ mod tests {
     fn unresolved_reason_is_human_readable() {
         let text = UnresolvedReason::NoCallHierarchyItem.to_string();
         assert!(text.contains("overload signature"));
+    }
+
+    #[test]
+    fn transient_content_modified_has_distinct_display_text() {
+        let a = UnresolvedReason::NoCallHierarchyItem.to_string();
+        let b = UnresolvedReason::TransientContentModified.to_string();
+        assert_ne!(a, b);
+        assert!(b.contains("content modified"));
     }
 
     #[test]
