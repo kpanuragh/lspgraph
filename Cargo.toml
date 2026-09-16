@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/lspgraph-core"]
+members = ["crates/lspgraph-core", "crates/lspgraph-tui"]
 
 [workspace.package]
 edition = "2021"
