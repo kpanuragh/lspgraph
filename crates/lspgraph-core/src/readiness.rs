@@ -42,18 +42,36 @@ pub fn even_stride<T>(items: &[T], max: usize) -> Vec<&T> {
     items.iter().step_by(stride.max(1)).take(max).collect()
 }
 
+/// Time left before `deadline`, or `None` if it has already passed.
+pub fn remaining_budget(deadline: Instant, now: Instant) -> Option<Duration> {
+    deadline.checked_duration_since(now).filter(|d| !d.is_zero())
+}
+
 pub fn wait_until_ready(
     server: &LanguageServer,
     files: &[PathBuf],
     language_id: &str,
     cfg: &ReadinessConfig,
 ) -> Result<()> {
+    // One deadline governs both gathering and polling. Single-target polling
+    // and quiet-period heuristics were both wrong for the same underlying
+    // reason: they let one phase run unbounded while the clock looked away.
+    let deadline = Instant::now() + cfg.timeout;
+
     let mut candidates: Vec<NamedCallable> = Vec::new();
+    let mut files_attempted = 0usize;
+    let mut files_failed = 0usize;
     for path in even_stride(files, cfg.max_files) {
+        if remaining_budget(deadline, Instant::now()).is_none() {
+            break;
+        }
+        files_attempted += 1;
         if server.open(path, language_id).is_err() {
+            files_failed += 1;
             continue;
         }
         let Ok(syms) = server.document_symbols(path) else {
+            files_failed += 1;
             continue;
         };
         let mut found = Vec::new();
@@ -63,13 +81,24 @@ pub fn wait_until_ready(
     }
 
     if candidates.is_empty() {
-        return Err(Error::NotReady { timeout: Duration::ZERO, tried: 0 });
+        return Err(Error::NoCandidates { files_attempted, files_failed });
     }
 
-    let start = Instant::now();
-    while start.elapsed() < cfg.timeout {
+    while remaining_budget(deadline, Instant::now()).is_some() {
         for c in &candidates {
+            if remaining_budget(deadline, Instant::now()).is_none() {
+                break;
+            }
             let path = c.uri.to_file_path().unwrap_or_default();
+            // Checking the budget before each candidate (not once per round)
+            // is the fix: a round of up to max_files * per_file requests
+            // could otherwise blow past the deadline by however long each
+            // individual request takes to time out. We deliberately do not
+            // plumb a shrinking per-request budget into server.rs's LSP
+            // calls for this — that's a cross-task change to save a residual
+            // overshoot already bounded by server.rs's own REQUEST_TIMEOUT
+            // (60s), i.e. at most one in-flight request past the deadline
+            // instead of an entire unbounded round.
             if let Ok(items) = server.prepare_call_hierarchy(&path, c.position) {
                 if !items.is_empty() {
                     return Ok(());
@@ -116,5 +145,36 @@ mod tests {
         assert_eq!(c.max_files, 40);
         assert_eq!(c.per_file, 3);
         assert_eq!(c.timeout, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn remaining_budget_reports_time_left_when_deadline_is_ahead() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(10);
+        let left = remaining_budget(deadline, now).expect("deadline is ahead");
+        assert!(left <= Duration::from_secs(10) && left > Duration::from_secs(9));
+    }
+
+    #[test]
+    fn remaining_budget_is_none_at_or_past_the_deadline() {
+        let now = Instant::now();
+        assert!(remaining_budget(now, now).is_none());
+        let past_deadline = now - Duration::from_secs(1);
+        assert!(remaining_budget(past_deadline, now).is_none());
+    }
+
+    #[test]
+    fn zero_candidates_reports_no_candidates_not_a_zero_timeout() {
+        let err = Error::NoCandidates { files_attempted: 5, files_failed: 3 };
+        let msg = err.to_string();
+        assert!(
+            msg.contains('5') && msg.contains('3'),
+            "message should mention both counts: {msg}"
+        );
+        assert!(
+            msg.contains("files examined") && msg.contains("failed to respond"),
+            "message should describe the gathering outcome: {msg}"
+        );
+        assert!(!matches!(err, Error::NotReady { .. }));
     }
 }

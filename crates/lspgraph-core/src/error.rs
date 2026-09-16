@@ -25,6 +25,9 @@ pub enum Error {
 
     #[error("server not ready after {}s; tried {tried} candidate symbols", timeout.as_secs())]
     NotReady { timeout: Duration, tried: usize },
+
+    #[error("no candidate symbols found: {files_attempted} files examined, {files_failed} of them failed to respond")]
+    NoCandidates { files_attempted: usize, files_failed: usize },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
