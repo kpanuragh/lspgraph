@@ -59,6 +59,18 @@ impl App {
         }
     }
 
+    /// A freshly-seen node id, not yet expanded. Shared by `Seeded` (the
+    /// initial focus) and `Expanded` (the neighbours it reveals) so the two
+    /// arms cannot drift apart on how a `Node` is built.
+    fn unexpanded_node(id: NodeId) -> Node {
+        Node {
+            id,
+            kind_name: "Function".into(),
+            detail: None,
+            state: NodeState::Unexpanded,
+        }
+    }
+
     pub fn screen(&self) -> Screen {
         self.screen
     }
@@ -122,12 +134,7 @@ impl App {
             }
             Event::Seeded(Some(id)) => {
                 self.screen = Screen::Graph;
-                self.focus = Some(Node {
-                    id: id.clone(),
-                    kind_name: "Function".into(),
-                    detail: None,
-                    state: NodeState::Unexpanded,
-                });
+                self.focus = Some(Self::unexpanded_node(id.clone()));
                 self.callers.clear();
                 self.callees.clear();
                 self.caller_sel = 0;
@@ -140,19 +147,18 @@ impl App {
                 Vec::new()
             }
             Event::Expanded(id, exp) => {
+                // A stale response for a node that is no longer the one we
+                // asked about (the user re-centred or went back before it
+                // arrived) must be discarded whole: no list replacement, no
+                // selection reset. `pending` is set by every path that
+                // issues an `Expand`, so it is the current request's id.
                 if self.pending.as_ref() == Some(&id) {
                     self.pending = None;
+                    self.callers = exp.callers.iter().cloned().map(Self::unexpanded_node).collect();
+                    self.callees = exp.callees.iter().cloned().map(Self::unexpanded_node).collect();
+                    self.caller_sel = 0;
+                    self.callee_sel = 0;
                 }
-                let to_node = |n: &NodeId| Node {
-                    id: n.clone(),
-                    kind_name: "Function".into(),
-                    detail: None,
-                    state: NodeState::Unexpanded,
-                };
-                self.callers = exp.callers.iter().map(to_node).collect();
-                self.callees = exp.callees.iter().map(to_node).collect();
-                self.caller_sel = 0;
-                self.callee_sel = 0;
                 Vec::new()
             }
             Event::Failed(id, why) => {
@@ -476,5 +482,38 @@ mod tests {
         a.move_pane(true);
         a.move_pane(true);
         assert_eq!(a.pane(), Pane::Callees);
+    }
+
+    #[test]
+    fn a_stale_expansion_does_not_overwrite_the_current_panes() {
+        let mut a = App::new();
+        a.on_event(Event::Ready { can_search: true });
+        a.on_event(Event::Seeded(Some(nid("f"))));
+        a.on_event(Event::Expanded(
+            nid("f"),
+            Expansion {
+                callers: vec![nid("up")],
+                callees: vec![],
+            },
+        ));
+        // Re-centre onto "up" (Expand(up) in flight), then go back to "f"
+        // (Expand(f) in flight) before "up"'s answer arrives.
+        a.recentre();
+        a.back();
+        // The late response for "up" arrives after we've already moved on.
+        a.on_event(Event::Expanded(
+            nid("up"),
+            Expansion {
+                callers: vec![nid("ghost")],
+                callees: vec![nid("ghost2")],
+            },
+        ));
+        assert_eq!(a.focus().unwrap().id.name, "f", "focus must still be f");
+        assert!(!a.callers().iter().any(|n| n.id.name == "ghost"));
+        assert!(!a.callees().iter().any(|n| n.id.name == "ghost2"));
+        assert!(
+            a.is_pending(),
+            "f's own expansion has not arrived; the stale reply for up must not be mistaken for it"
+        );
     }
 }
