@@ -10,4 +10,7 @@ pub mod transport;
 pub mod symbols;
 pub mod readiness;
 
+#[cfg(all(test, unix))]
+mod testutil;
+
 pub use error::{Error, Result};

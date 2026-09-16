@@ -21,14 +21,32 @@ pub struct LanguageServer {
     pub name: String,
     pub root: PathBuf,
     conn: Connection,
-    child: Child,
+    /// `None` once the child has been killed and reaped, which is what makes
+    /// an explicit `shutdown()` and the `Drop` below compose: whichever runs
+    /// first takes the `Child`, and the other becomes a no-op.
+    child: Option<Child>,
+}
+
+/// A server that is merely dropped must still die.
+///
+/// Dropping the `Connection` is not enough on its own: the language server
+/// only sees EOF on its stdin once every writer handle is gone, and even then
+/// a server that ignores EOF would linger. Without this, a caller that drops
+/// a `LanguageServer` (or an `Engine` wrapping one) leaks the process — for
+/// rust-analyzer, multiple gigabytes per leak — with nothing but process exit
+/// to clean it up.
+impl Drop for LanguageServer {
+    fn drop(&mut self) {
+        Self::kill_and_reap(&mut self.child);
+    }
 }
 
 /// Owns a spawned child for the duration of `start`. If `start` returns
 /// early for any reason (an early `?`, the capability gate, or anything
 /// added later), `Drop` kills and reaps the process so a rejected or
 /// failed-to-initialize server is never leaked. The success path calls
-/// `disarm` to take the `Child` back out without killing it.
+/// `disarm` to hand the `Child` over to the `LanguageServer`, whose own
+/// `Drop` takes over the same responsibility from there.
 struct ChildGuard(Option<Child>);
 
 impl ChildGuard {
@@ -106,7 +124,7 @@ impl LanguageServer {
             name: name.to_string(),
             root: root.to_path_buf(),
             conn,
-            child,
+            child: Some(child),
         })
     }
 
@@ -189,12 +207,25 @@ impl LanguageServer {
         }
     }
 
+    /// Ask the server to exit politely, then make sure it actually has.
+    ///
+    /// Taking the `Child` here leaves `Drop` with nothing to do, so calling
+    /// `shutdown()` and then dropping neither double-kills nor panics.
     pub fn shutdown(mut self) -> Result<()> {
         let _ = self.conn.request("shutdown", Value::Null, Duration::from_secs(5));
         let _ = self.conn.notify("exit", Value::Null);
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        Self::kill_and_reap(&mut self.child);
         Ok(())
+    }
+
+    /// Kill and reap the child if it is still ours to kill. Errors are
+    /// ignored: a server that already exited is exactly the desired state,
+    /// and this runs from `Drop`, where there is nobody to report to.
+    fn kill_and_reap(slot: &mut Option<Child>) {
+        if let Some(mut child) = slot.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 
@@ -239,55 +270,129 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn failed_start_does_not_leak_the_child_process() {
-        use std::os::unix::fs::PermissionsExt;
+    mod process_lifecycle {
+        use super::*;
+        use crate::testutil::{sh_send_frame, FakeServerScript, INITIALIZE_OK, SH_IDLE};
 
-        let pid = std::process::id();
-        let script_name = format!("lspgraph-fake-server-{pid}.sh");
-        let script_path = std::env::temp_dir().join(&script_name);
+        #[test]
+        fn failed_start_does_not_leak_the_child_process() {
+            // `cat` echoes our framed `initialize` request back to us. The
+            // reader loop treats the echo (an id + method, no result/error) as
+            // a server-initiated request and auto-replies with a null result,
+            // which `cat` echoes again — this time it *is* a response, so it
+            // resolves our `initialize` call with `null` capabilities, failing
+            // the call-hierarchy gate quickly instead of timing out. If `start`
+            // did not kill the child, it would sit in `cat` (no EOF ever
+            // arrives) and then `sleep 300`.
+            let script = FakeServerScript::new("failed-start", "cat\nsleep 300\n");
 
-        // `cat` echoes our framed `initialize` request back to us. The
-        // reader loop treats the echo (an id + method, no result/error) as a
-        // server-initiated request and auto-replies with a null result,
-        // which `cat` echoes again — this time it *is* a response, so it
-        // resolves our `initialize` call with `null` capabilities, failing
-        // the call-hierarchy gate quickly instead of timing out. If `start`
-        // did not kill the child, it would sit in `cat` (no EOF ever
-        // arrives) and then `sleep 300`.
-        std::fs::write(&script_path, "#!/bin/sh\ncat\nsleep 300\n").unwrap();
-        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            // `LanguageServer` is not `Debug`, so unwrap the error side; a
+            // successful start would simply be dropped (and killed) here.
+            let err = script
+                .start()
+                .err()
+                .expect("start must fail against the fake server");
+            assert!(
+                matches!(err, Error::NoCallHierarchy { .. }),
+                "expected the capability gate to reject the fake server, got {err:?}"
+            );
 
-        let cfg = ServerConfig {
-            cmd: script_path.display().to_string(),
-            extensions: vec![],
-            ready_timeout_secs: 300,
-            concurrency: 1,
-        };
-        let root = std::env::temp_dir();
-
-        let result = LanguageServer::start("fake", &cfg, &root);
-        assert!(result.is_err(), "expected start to fail against the fake server");
-
-        // Poll briefly rather than asserting immediately, so the test isn't
-        // racing the kill/wait done by ChildGuard's Drop.
-        let mut still_running = true;
-        for _ in 0..20 {
-            let found = Command::new("pgrep")
-                .arg("-f")
-                .arg(&script_name)
-                .output()
-                .map(|o| o.status.success())
-                .unwrap_or(false);
-            if !found {
-                still_running = false;
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(100));
+            assert!(
+                script.no_process_survives(),
+                "fake server process {} was leaked",
+                script.name()
+            );
         }
 
-        let _ = std::fs::remove_file(&script_path);
+        /// A script that initializes successfully and then idles forever
+        /// without ever reading its stdin, so the only thing that can end it
+        /// is somebody killing it.
+        fn long_lived_script(tag: &str) -> FakeServerScript {
+            FakeServerScript::new(tag, &format!("{}{SH_IDLE}", sh_send_frame(INITIALIZE_OK)))
+        }
 
-        assert!(!still_running, "fake server process {script_name} was leaked");
+        #[test]
+        fn dropping_a_started_server_kills_the_child_process() {
+            // A `LanguageServer` that is merely dropped — no `shutdown()` —
+            // must not leave the server running. A TUI switching repositories
+            // would otherwise accumulate one full language server per switch.
+            let script = long_lived_script("drop-leak");
+            let server = script.start().expect("fake server initializes");
+            assert!(script.is_running(), "fake server should be up before the drop");
+
+            drop(server);
+
+            assert!(
+                script.no_process_survives(),
+                "dropped server leaked process {}",
+                script.name()
+            );
+        }
+
+        #[test]
+        fn dropping_an_engine_kills_the_wrapped_server() {
+            // The same guarantee has to survive being wrapped in an `Engine`,
+            // which is how every real caller holds a server.
+            let script = long_lived_script("engine-drop-leak");
+            let server = script.start().expect("fake server initializes");
+            let engine = crate::engine::Engine::new(server);
+            assert!(script.is_running(), "fake server should be up before the drop");
+
+            drop(engine);
+
+            assert!(
+                script.no_process_survives(),
+                "dropped engine leaked process {}",
+                script.name()
+            );
+        }
+
+        #[test]
+        fn explicit_shutdown_kills_the_child_and_the_later_drop_is_a_no_op() {
+            // `shutdown()` consumes the server, so its `Drop` runs immediately
+            // afterwards. It must not double-kill or panic on an absent child.
+            let script = long_lived_script("shutdown");
+            let server = script.start().expect("fake server initializes");
+
+            server.shutdown().expect("shutdown reports success");
+
+            assert!(
+                script.no_process_survives(),
+                "shutdown left process {} running",
+                script.name()
+            );
+        }
+
+        #[test]
+        fn engine_shutdown_kills_the_wrapped_server() {
+            let script = long_lived_script("engine-shutdown");
+            let server = script.start().expect("fake server initializes");
+
+            crate::engine::Engine::new(server)
+                .shutdown()
+                .expect("engine shutdown reports success");
+
+            assert!(
+                script.no_process_survives(),
+                "engine shutdown left process {} running",
+                script.name()
+            );
+        }
+
+        #[test]
+        fn into_server_hands_the_server_back() {
+            let script = long_lived_script("into-server");
+            let server = script.start().expect("fake server initializes");
+
+            let server = crate::engine::Engine::new(server).into_server();
+            assert_eq!(server.name, "fake");
+            server.shutdown().expect("shutdown reports success");
+
+            assert!(
+                script.no_process_survives(),
+                "process {} survived into_server + shutdown",
+                script.name()
+            );
+        }
     }
 }

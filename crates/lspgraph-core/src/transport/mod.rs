@@ -42,10 +42,19 @@ fn read_loop(
                         Ok(v) => v,
                         Err(_) => continue,
                     };
-                    let id = msg.get("id").and_then(|v| v.as_i64());
+                    // JSON-RPC allows an id to be a number OR a string, and
+                    // `"id": null` is not an id at all. Keep it as a `&Value`
+                    // so a server-initiated request can be answered with its
+                    // id echoed back verbatim, whatever its type: a server
+                    // that uses string ids would otherwise never see a reply
+                    // and could block indefinitely.
+                    let id = msg.get("id").filter(|v| !v.is_null());
                     let is_response = msg.get("result").is_some() || msg.get("error").is_some();
 
-                    if let (Some(id), true) = (id, is_response) {
+                    // Response correlation stays integer-only on purpose: the
+                    // only ids we correlate are ones we generated ourselves,
+                    // and those are always integers.
+                    if let (Some(id), true) = (id.and_then(Value::as_i64), is_response) {
                         if let Some(sender) = pending.lock().unwrap().remove(&id) {
                             let _ = sender.send(msg);
                         }
@@ -102,6 +111,13 @@ impl Connection {
             // sender (`RecvTimeoutError::Disconnected` -> `Error::ServerExited`)
             // immediately, instead of waiting out its full timeout.
             read_loop(&mut reader, &pending_r, &writer_r, &tx);
+            // Release this thread's writer handle explicitly. The reader
+            // thread holds a clone of the writer `Arc` only so it can answer
+            // server->client requests; holding it past the end of the loop
+            // would keep the child's stdin open forever, so dropping the
+            // `Connection` would never let the child see EOF (it would never
+            // exit, and nothing would ever close this loop).
+            drop(writer_r);
             if let Ok(mut p) = pending_r.lock() {
                 p.clear();
             }
@@ -280,6 +296,19 @@ mod tests {
         );
     }
 
+    /// A writer that records everything the client sends.
+    struct Tee(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Tee {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
     #[test]
     fn answers_server_initiated_requests() {
         // A server->client request must be answered or the server can block.
@@ -288,21 +317,55 @@ mod tests {
             json!({"jsonrpc":"2.0","id":1,"result":"after"}),
         ]);
         let written = Arc::new(Mutex::new(Vec::<u8>::new()));
-        struct Tee(Arc<Mutex<Vec<u8>>>);
-        impl Write for Tee {
-            fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
-                self.0.lock().unwrap().extend_from_slice(b);
-                Ok(b.len())
-            }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
         let conn = Connection::new(server, Tee(written.clone()));
         let got = conn.request("x", json!({}), Duration::from_secs(2)).unwrap();
         assert_eq!(got, json!("after"));
 
         let sent = String::from_utf8(written.lock().unwrap().clone()).unwrap();
         assert!(sent.contains("\"id\":99"), "must reply to server request 99: {sent}");
+    }
+
+    #[test]
+    fn answers_a_server_request_carrying_a_string_id() {
+        // JSON-RPC permits a string id. Matching ids with `as_i64` alone sent
+        // such a request down the notification path, so it was never
+        // answered and a server awaiting the reply could block forever.
+        let server = canned(&[
+            json!({"jsonrpc":"2.0","id":"cfg-7","method":"workspace/configuration","params":{}}),
+            json!({"jsonrpc":"2.0","id":1,"result":"after"}),
+        ]);
+        let written = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let conn = Connection::new(server, Tee(written.clone()));
+        let got = conn.request("x", json!({}), Duration::from_secs(2)).unwrap();
+        assert_eq!(got, json!("after"));
+
+        let sent = String::from_utf8(written.lock().unwrap().clone()).unwrap();
+        assert!(
+            sent.contains(r#""id":"cfg-7""#),
+            "must echo the server's string id back verbatim: {sent}"
+        );
+        // ...and it must not have been mistaken for a notification.
+        assert!(
+            conn.notifications()
+                .recv_timeout(Duration::from_millis(200))
+                .is_err(),
+            "a server request must not be delivered as a notification"
+        );
+    }
+
+    #[test]
+    fn a_null_id_is_treated_as_a_notification() {
+        // `"id": null` is not an id; answering it would be wrong.
+        let server = canned(&[
+            json!({"jsonrpc":"2.0","id":Value::Null,"method":"window/logMessage","params":{}}),
+        ]);
+        let written = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let conn = Connection::new(server, Tee(written.clone()));
+        let n = conn
+            .notifications()
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(n.method, "window/logMessage");
+        assert!(written.lock().unwrap().is_empty(), "nothing should be replied");
     }
 }

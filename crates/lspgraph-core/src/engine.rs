@@ -33,6 +33,22 @@ impl Engine {
         &self.graph
     }
 
+    /// Shut the language server down, consuming the engine.
+    ///
+    /// Without this, `LanguageServer::shutdown` is unreachable for anything
+    /// held by an `Engine` — which is every real caller.
+    pub fn shutdown(self) -> Result<()> {
+        self.server.shutdown()
+    }
+
+    /// Hand the language server back, discarding the graph.
+    ///
+    /// For callers that want to keep the (expensive) server alive across
+    /// engines — switching repositories reuses the process, for instance.
+    pub fn into_server(self) -> LanguageServer {
+        self.server
+    }
+
     pub fn expansions_performed(&self) -> usize {
         self.expansions
     }
@@ -136,6 +152,7 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::graph::UnresolvedReason;
+    use lsp_types::{Position, Url};
 
     // Engine::expand needs a live server, so behaviour that can be checked
     // without one is checked here; the rest is covered in Task 10.
@@ -160,5 +177,83 @@ mod tests {
             g.get(&id).unwrap().state,
             NodeState::Unresolved(UnresolvedReason::NoCallHierarchyItem)
         ));
+    }
+
+    /// A script that speaks just enough LSP to reach the branch under test:
+    /// it completes `initialize` advertising `callHierarchyProvider`, then
+    /// answers every `prepareCallHierarchy` with the transient
+    /// ContentModified error (-32801), forever.
+    ///
+    /// It reads stdin frame by frame rather than replying blindly, because
+    /// a response that arrives before its request was registered is dropped.
+    #[cfg(unix)]
+    const ALWAYS_CONTENT_MODIFIED: &str = r##"send() {
+  printf 'Content-Length: %d\r\n\r\n%s' "${#1}" "$1"
+}
+while IFS= read -r header; do
+  case "$header" in
+    Content-Length:*) ;;
+    *) continue ;;
+  esac
+  len=$(printf '%s' "$header" | tr -d '\r' | sed 's/^Content-Length:[ ]*//')
+  IFS= read -r _blank
+  body=$(dd bs=1 count="$len" 2>/dev/null)
+  id=$(printf '%s' "$body" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$body" in
+    *'"method":"initialize"'*)
+      send "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"capabilities\":{\"callHierarchyProvider\":true}}}"
+      ;;
+    *prepareCallHierarchy*)
+      send "{\"jsonrpc\":\"2.0\",\"id\":$id,\"error\":{\"code\":-32801,\"message\":\"content modified\"}}"
+      ;;
+  esac
+done
+"##;
+
+    /// Spec 5.5: a symbol that only ever fails transiently must still appear
+    /// in the graph. The retry in `server.rs` absorbs the transient case
+    /// against a live server, so this branch is otherwise never reached —
+    /// a server that never stops saying ContentModified is the only way in.
+    #[cfg(unix)]
+    #[test]
+    fn a_persistently_content_modified_symbol_is_recorded_as_unresolved() {
+        use crate::testutil::FakeServerScript;
+
+        let script = FakeServerScript::new("content-modified", ALWAYS_CONTENT_MODIFIED);
+        let server = script.start().expect("fake server initializes");
+        let mut engine = Engine::new(server);
+
+        // The file need not exist: `prepareCallHierarchy` sends a URI, and
+        // this server errors on it without ever reading it.
+        let cand = NamedCallable {
+            name: "middle".to_string(),
+            uri: Url::parse("file:///tmp/lspgraph-content-modified.rs").unwrap(),
+            position: Position { line: 7, character: 3 },
+        };
+
+        let seeded = engine.seed(&cand).expect("seed must not surface the transient error");
+        assert!(seeded.is_none(), "an unresolvable symbol yields no node id");
+
+        let id = NodeId {
+            uri: cand.uri.to_string(),
+            line: 7,
+            character: 3,
+            name: "middle".to_string(),
+        };
+        let node = engine
+            .graph()
+            .get(&id)
+            .expect("the symbol must be recorded, not dropped");
+        assert_eq!(
+            node.state,
+            NodeState::Unresolved(UnresolvedReason::TransientContentModified)
+        );
+
+        engine.shutdown().expect("shutdown");
+        assert!(
+            script.no_process_survives(),
+            "fake server {} was leaked",
+            script.name()
+        );
     }
 }
