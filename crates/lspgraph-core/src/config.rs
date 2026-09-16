@@ -18,8 +18,20 @@ pub struct ServerConfig {
     pub cmd: String,
     /// File extensions without a leading dot.
     pub extensions: Vec<String>,
+    /// How long to wait for the server to become genuinely ready, in seconds
+    /// (spec 5.2; default 300). Read via
+    /// [`crate::readiness::ReadinessConfig::from_server_config`].
     #[serde(default = "default_ready_timeout")]
     pub ready_timeout_secs: u64,
+    /// RESERVED — parsed and validated, but **not consumed by anything yet**.
+    ///
+    /// Spec 5.6 ships a configurable concurrency limit defaulting to serial,
+    /// with the real number to be set by measurement rather than assumption.
+    /// The measurement has not been done and the pipelining is not written,
+    /// so every crawl today is serial no matter what this says. The key is
+    /// accepted now so that configs written against it keep parsing, and is
+    /// documented here (and in the README) so nobody sets it expecting a
+    /// speedup.
     #[serde(default = "default_concurrency")]
     pub concurrency: usize,
 }

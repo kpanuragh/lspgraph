@@ -51,7 +51,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let t0 = Instant::now();
     let server = LanguageServer::start(&lang, server_cfg, &root)?;
-    wait_until_ready(&server, &files, &lang, &ReadinessConfig::default())?;
+    // Honour the server table's `ready_timeout_secs` rather than silently
+    // ignoring it in favour of the built-in default.
+    wait_until_ready(
+        &server,
+        &files,
+        &lang,
+        &ReadinessConfig::from_server_config(server_cfg),
+    )?;
     println!("ready in {:.1}s", t0.elapsed().as_secs_f64());
 
     let t1 = Instant::now();
@@ -88,7 +95,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let leaves = engine
         .graph()
-        .nodes_in_file(&path_to_uri(&files[0]).to_string())
+        .nodes_in_file(path_to_uri(&files[0]).as_str())
         .into_iter()
         .filter(|id| {
             matches!(
@@ -98,5 +105,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .count();
     println!("unresolved nodes recorded in first file: {leaves}");
+
+    // Shut the server down explicitly. Relying on process exit works for a
+    // one-shot example and leaks for anything longer-lived.
+    engine.shutdown()?;
     Ok(())
 }

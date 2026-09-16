@@ -1,7 +1,8 @@
 //! Integration tests against real language servers.
 //!
 //! Each test skips when its server is absent, so `cargo test` stays green on
-//! a machine with no language servers installed. CI installs all three.
+//! a machine with no language servers installed. There is no CI pipeline yet,
+//! so these are what "validated" means for the three supported servers.
 //!
 //! `servers.toml` at the repo root keeps bare command names (`rust-analyzer`,
 //! `vtsls --stdio`, `basedpyright-langserver --stdio`), which is correct for
@@ -17,7 +18,6 @@ use lspgraph_core::readiness::{wait_until_ready, ReadinessConfig};
 use lspgraph_core::server::LanguageServer;
 use lspgraph_core::symbols::{collect_named_callables, NamedCallable};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 fn servers_toml() -> Config {
     let path = std::env::var("LSPGRAPH_SERVERS_TOML")
@@ -97,11 +97,13 @@ fn assert_three_level_chain(lang: &str, ext: &str, fixture_dir: &str) {
     assert!(!files.is_empty(), "no {ext} fixture files");
 
     let server = LanguageServer::start(lang, server_cfg, &root_dir).expect("server starts");
+    // Built from the server table, so a configured `ready_timeout_secs` is
+    // genuinely honoured here rather than being parsed and thrown away.
     wait_until_ready(
         &server,
         &files,
         lang,
-        &ReadinessConfig { timeout: Duration::from_secs(180), ..Default::default() },
+        &ReadinessConfig::from_server_config(server_cfg),
     )
     .expect("server becomes ready");
 
@@ -154,6 +156,10 @@ fn assert_three_level_chain(lang: &str, ext: &str, fixture_dir: &str) {
     assert_eq!(again, exp);
 
     assert_eq!(engine.graph().get(&id).unwrap().state, NodeState::Expanded);
+
+    // Not optional: without this the server process outlives the test and is
+    // reaped only because the test binary exits.
+    engine.shutdown().expect("server shuts down");
 }
 
 #[test]
@@ -186,7 +192,7 @@ fn typescript_unresolvable_symbols_are_recorded_not_dropped() {
         &server,
         &files,
         "typescript",
-        &ReadinessConfig { timeout: Duration::from_secs(180), ..Default::default() },
+        &ReadinessConfig::from_server_config(server_cfg),
     )
     .unwrap();
 
@@ -228,4 +234,6 @@ fn typescript_unresolvable_symbols_are_recorded_not_dropped() {
     );
     assert!(unresolved > 0, "fixture's overload/arrow cases should be unresolved");
     assert_eq!(resolved + unresolved, candidate_count);
+
+    engine.shutdown().expect("server shuts down");
 }

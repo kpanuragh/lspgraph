@@ -6,6 +6,7 @@
 //! portable answer is to poll a real semantic request across MANY candidates
 //! and accept the first that answers.
 
+use crate::config::ServerConfig;
 use crate::error::{Error, Result};
 use crate::server::LanguageServer;
 use crate::symbols::{collect_named_callables, NamedCallable};
@@ -26,11 +27,34 @@ impl Default for ReadinessConfig {
     }
 }
 
+impl ReadinessConfig {
+    /// Honour a server table's `ready_timeout_secs`.
+    ///
+    /// Spec 5.2 requires the readiness timeout to be configurable. Callers
+    /// that build a `ReadinessConfig::default()` from a `ServerConfig` they
+    /// already hold silently ignore whatever the user wrote, which is worse
+    /// than having no knob at all. The sampling bounds keep their defaults;
+    /// only the timeout is configurable today.
+    pub fn from_server_config(cfg: &ServerConfig) -> ReadinessConfig {
+        ReadinessConfig {
+            timeout: Duration::from_secs(cfg.ready_timeout_secs),
+            ..ReadinessConfig::default()
+        }
+    }
+}
+
 /// Sample up to `max` items spread evenly across the slice.
 ///
 /// Taking the first N alphabetically is a trap: it can land entirely inside
 /// one directory (a benchmark tree with unresolvable imports, say), which
-/// makes a healthy server look dead.
+/// makes a healthy server look dead. That is spec 5.2's 600-second false
+/// failure.
+///
+/// The index is computed as `i * len / max` rather than by stepping with an
+/// integer stride. An integer stride collapses to 1 for every `len` between
+/// `max` and `2 * max` — a 40-file cap over a 79-file repository would then
+/// take files 0..=39, i.e. the first alphabetical half, which is exactly the
+/// clustering this function exists to avoid.
 pub fn even_stride<T>(items: &[T], max: usize) -> Vec<&T> {
     if items.is_empty() || max == 0 {
         return Vec::new();
@@ -38,8 +62,8 @@ pub fn even_stride<T>(items: &[T], max: usize) -> Vec<&T> {
     if items.len() <= max {
         return items.iter().collect();
     }
-    let stride = items.len() / max;
-    items.iter().step_by(stride.max(1)).take(max).collect()
+    let len = items.len();
+    (0..max).map(|i| &items[i * len / max]).collect()
 }
 
 /// Time left before `deadline`, or `None` if it has already passed.
@@ -132,6 +156,26 @@ mod tests {
     }
 
     #[test]
+    fn stride_spreads_at_a_realistic_repository_ratio() {
+        // The ratio that matters in practice, and the one an integer stride
+        // gets wrong: max < len < 2 * max. A repository of 79 files under the
+        // 40-file cap must not collapse to "the first 40 files".
+        let v: Vec<i32> = (0..79).collect();
+        let picked = even_stride(&v, 40);
+        assert_eq!(picked.len(), 40);
+        assert_eq!(**picked.first().unwrap(), 0);
+        // The last pick must land in the final quarter of the slice.
+        assert!(
+            **picked.last().unwrap() >= 79 * 3 / 4,
+            "clustered in the first half of the slice: {picked:?}"
+        );
+        // ...and no file may be sampled twice.
+        let mut sorted: Vec<i32> = picked.iter().map(|x| **x).collect();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 40, "duplicate picks: {picked:?}");
+    }
+
+    #[test]
     fn stride_handles_empty_and_zero_max() {
         let empty: Vec<i32> = Vec::new();
         assert!(even_stride(&empty, 5).is_empty());
@@ -145,6 +189,25 @@ mod tests {
         assert_eq!(c.max_files, 40);
         assert_eq!(c.per_file, 3);
         assert_eq!(c.timeout, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn a_configured_ready_timeout_reaches_the_readiness_config() {
+        // A `ready_timeout_secs` that nothing reads is a lie in the config
+        // file; spec 5.2 requires it to be honoured.
+        let cfg = ServerConfig {
+            cmd: "fake".into(),
+            extensions: vec!["rs".into()],
+            ready_timeout_secs: 42,
+            concurrency: 1,
+        };
+        let rc = ReadinessConfig::from_server_config(&cfg);
+        assert_eq!(rc.timeout, Duration::from_secs(42));
+        assert_ne!(rc.timeout, ReadinessConfig::default().timeout);
+        // Only the timeout is configurable; the sampling bounds are the spec
+        // defaults.
+        assert_eq!(rc.max_files, ReadinessConfig::default().max_files);
+        assert_eq!(rc.per_file, ReadinessConfig::default().per_file);
     }
 
     #[test]
