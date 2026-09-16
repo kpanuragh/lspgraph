@@ -2,6 +2,7 @@
 
 use crate::config::ServerConfig;
 use crate::error::{Error, Result};
+use crate::symbols::SymbolMatch;
 use crate::transport::Connection;
 use lsp_types::{
     CallHierarchyItem, DocumentSymbol, Position, Url,
@@ -25,6 +26,10 @@ pub struct LanguageServer {
     /// an explicit `shutdown()` and the `Drop` below compose: whichever runs
     /// first takes the `Child`, and the other becomes a no-op.
     child: Option<Child>,
+    /// Whether `initialize` advertised `workspaceSymbolProvider`. Search must
+    /// be able to say "this server cannot search" rather than show an empty
+    /// list, which would be indistinguishable from "nothing matched".
+    supports_workspace_symbol: bool,
 }
 
 /// A server that is merely dropped must still die.
@@ -102,7 +107,10 @@ impl LanguageServer {
                         "callHierarchy": {"dynamicRegistration": false},
                         "documentSymbol": {"hierarchicalDocumentSymbolSupport": true}
                     },
-                    "workspace": {"workspaceFolders": true}
+                    "workspace": {
+                        "workspaceFolders": true,
+                        "symbol": {"dynamicRegistration": false}
+                    }
                 }
             }),
             Duration::from_secs(180),
@@ -117,6 +125,12 @@ impl LanguageServer {
             return Err(Error::NoCallHierarchy { server: name.to_string() });
         }
 
+        let supports_workspace_symbol = caps
+            .get("capabilities")
+            .and_then(|c| c.get("workspaceSymbolProvider"))
+            .map(|v| v != &Value::Bool(false) && !v.is_null())
+            .unwrap_or(false);
+
         conn.notify("initialized", json!({}))?;
 
         let child = guard.disarm();
@@ -125,6 +139,7 @@ impl LanguageServer {
             root: root.to_path_buf(),
             conn,
             child: Some(child),
+            supports_workspace_symbol,
         })
     }
 
@@ -154,6 +169,27 @@ impl LanguageServer {
         // the hierarchical DocumentSymbol form, which all three validated
         // servers provide. Anything else is treated as "no symbols".
         Ok(serde_json::from_value(v).unwrap_or_default())
+    }
+
+    pub fn supports_workspace_symbol(&self) -> bool {
+        self.supports_workspace_symbol
+    }
+
+    /// Repository-wide symbol search, filtered to named callables.
+    ///
+    /// Returns an empty vec when the server does not advertise the capability;
+    /// callers must check `supports_workspace_symbol()` to tell that apart
+    /// from a query that genuinely matched nothing.
+    pub fn workspace_symbols(&self, query: &str) -> Result<Vec<SymbolMatch>> {
+        if !self.supports_workspace_symbol {
+            return Ok(Vec::new());
+        }
+        let v = self.conn.request(
+            "workspace/symbol",
+            json!({ "query": query }),
+            REQUEST_TIMEOUT,
+        )?;
+        Ok(crate::symbols::parse_workspace_symbols(&v))
     }
 
     pub fn prepare_call_hierarchy(

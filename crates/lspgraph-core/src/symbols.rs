@@ -137,3 +137,127 @@ mod tests {
         assert_eq!(out[0].position.line, 2);
     }
 }
+
+/// A symbol found by a repository-wide `workspace/symbol` search.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SymbolMatch {
+    pub name: String,
+    /// The enclosing class/module the server reported, if any.
+    pub container: Option<String>,
+    pub uri: Url,
+    pub position: Position,
+    pub kind: SymbolKind,
+}
+
+impl From<&SymbolMatch> for NamedCallable {
+    fn from(m: &SymbolMatch) -> NamedCallable {
+        NamedCallable {
+            name: m.name.clone(),
+            uri: m.uri.clone(),
+            position: m.position,
+        }
+    }
+}
+
+/// Parse a `workspace/symbol` result, keeping only named callables.
+///
+/// Servers return `SymbolInformation[]` (with `location.range`) or
+/// `WorkspaceSymbol[]` (with `location` possibly being `{uri}` only). Both
+/// carry `name`, `kind` and a uri, which is all we need.
+pub fn parse_workspace_symbols(v: &serde_json::Value) -> Vec<SymbolMatch> {
+    let Some(arr) = v.as_array() else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|e| {
+            let name = e.get("name")?.as_str()?.to_string();
+            let kind_n = e.get("kind")?.as_u64()?;
+            let kind = match kind_n {
+                6 => SymbolKind::METHOD,
+                12 => SymbolKind::FUNCTION,
+                _ => return None,
+            };
+            if !is_named_callable(&name, kind) {
+                return None;
+            }
+            let loc = e.get("location")?;
+            let uri = Url::parse(loc.get("uri")?.as_str()?).ok()?;
+            let start = loc.get("range").and_then(|r| r.get("start"));
+            let position = Position {
+                line: start.and_then(|s| s.get("line")).and_then(|l| l.as_u64()).unwrap_or(0) as u32,
+                character: start
+                    .and_then(|s| s.get("character"))
+                    .and_then(|c| c.as_u64())
+                    .unwrap_or(0) as u32,
+            };
+            Some(SymbolMatch {
+                name,
+                container: e
+                    .get("containerName")
+                    .and_then(|c| c.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string),
+                uri,
+                position,
+                kind,
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod workspace_symbol_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn sample() -> serde_json::Value {
+        json!([
+          {"name":"send_request","kind":12,
+           "containerName":"transport",
+           "location":{"uri":"file:///r/src/transport.rs",
+                       "range":{"start":{"line":87,"character":3},
+                                "end":{"line":87,"character":15}}}},
+          {"name":"expect() callback","kind":12,
+           "location":{"uri":"file:///r/src/t.ts",
+                       "range":{"start":{"line":4,"character":2},
+                                "end":{"line":4,"character":9}}}},
+          {"name":"Config","kind":23,
+           "location":{"uri":"file:///r/src/cfg.rs",
+                       "range":{"start":{"line":1,"character":0},
+                                "end":{"line":1,"character":6}}}}
+        ])
+    }
+
+    #[test]
+    fn keeps_named_callables() {
+        let out = parse_workspace_symbols(&sample());
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "send_request");
+        assert_eq!(out[0].container.as_deref(), Some("transport"));
+        assert_eq!(out[0].position.line, 87);
+        assert_eq!(out[0].position.character, 3);
+    }
+
+    #[test]
+    fn rejects_synthesized_callbacks_and_non_callables() {
+        let names: Vec<String> =
+            parse_workspace_symbols(&sample()).into_iter().map(|m| m.name).collect();
+        assert!(!names.iter().any(|n| n.contains("callback")));
+        assert!(!names.contains(&"Config".to_string()));
+    }
+
+    #[test]
+    fn a_null_or_non_array_result_is_empty_not_a_panic() {
+        assert!(parse_workspace_symbols(&serde_json::Value::Null).is_empty());
+        assert!(parse_workspace_symbols(&json!({"unexpected": true})).is_empty());
+    }
+
+    #[test]
+    fn converts_to_a_named_callable() {
+        let m = &parse_workspace_symbols(&sample())[0];
+        let c: NamedCallable = m.into();
+        assert_eq!(c.name, "send_request");
+        assert_eq!(c.position, m.position);
+        assert_eq!(c.uri, m.uri);
+    }
+}
