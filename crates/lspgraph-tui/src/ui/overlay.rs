@@ -15,7 +15,7 @@ pub fn draw_error(f: &mut Frame, area: Rect, msg: &str) {
     };
     f.render_widget(Clear, rect);
     f.render_widget(
-        Paragraph::new(format!("{msg}\n\nesc dismiss · r restart server · q quit"))
+        Paragraph::new(format!("{msg}\n\nesc dismiss · r exit to relaunch · q quit"))
             .wrap(Wrap { trim: true })
             .block(Block::default().borders(Borders::ALL).title("error")),
         rect,
@@ -51,5 +51,22 @@ mod tests {
     fn mentions_how_to_dismiss() {
         let out = rendered("boom");
         assert!(out.to_lowercase().contains("esc"), "must say how to dismiss:\n{out}");
+    }
+
+    #[test]
+    fn the_restart_hint_does_not_promise_a_restart() {
+        // `r` does not restart anything: the worker answers every Restart
+        // with a fresh Fatal and shuts down. The hint must say what actually
+        // happens (exit to relaunch), never something that reads as an
+        // in-session restart.
+        let out = rendered("boom");
+        assert!(
+            !out.contains("restart server"),
+            "must not promise a restart the code cannot deliver:\n{out}"
+        );
+        assert!(
+            out.to_lowercase().contains("relaunch"),
+            "must say what actually happens instead:\n{out}"
+        );
     }
 }
