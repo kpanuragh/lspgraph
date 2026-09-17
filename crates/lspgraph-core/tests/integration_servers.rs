@@ -120,9 +120,14 @@ fn assert_three_level_chain(lang: &str, ext: &str, fixture_dir: &str) {
     }
 
     // Anonymous callbacks must never survive enumeration.
+    //
+    // The check targets what actually marks a synthesized name — the word
+    // `callback` and empty call-parens, as in `expect() callback` — rather
+    // than any parenthesis. gopls legitimately names a Go method
+    // `(*counter).bump`, which carries parens but is a real, findable method.
     for c in &candidates {
         assert!(
-            !c.name.contains("callback") && !c.name.contains('('),
+            !c.name.contains("callback") && !c.name.contains("()"),
             "anonymous callback leaked into enumeration: {}",
             c.name
         );
@@ -175,6 +180,30 @@ fn typescript_call_chain() {
 #[test]
 fn python_call_chain() {
     assert_three_level_chain("python", "py", "py-fixture");
+}
+
+#[test]
+fn go_call_chain() {
+    assert_three_level_chain("go", "go", "go-fixture");
+}
+
+/// clangd needs a compile database to analyse anything, the same way
+/// rust-analyzer needs a loadable Cargo manifest. Its `directory` field must be
+/// absolute, so committing one would bake in whoever generated it — this writes
+/// it for the machine actually running the test.
+fn write_compile_commands(fixture_dir: &Path) {
+    let json = format!(
+        "[{{\n  \"directory\": {:?},\n  \"command\": \"cc -c src/main.c -o /dev/null\",\n  \"file\": \"src/main.c\"\n}}]\n",
+        fixture_dir.to_string_lossy()
+    );
+    std::fs::write(fixture_dir.join("compile_commands.json"), json)
+        .expect("write compile_commands.json");
+}
+
+#[test]
+fn c_call_chain() {
+    write_compile_commands(&fixture("c-fixture"));
+    assert_three_level_chain("c", "c", "c-fixture");
 }
 
 #[test]

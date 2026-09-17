@@ -5,3 +5,11 @@
 # so it gets its own build artifacts under this repo.
 crates/lspgraph-core/fixtures/rust-fixture/target
 crates/lspgraph-core/fixtures/rust-fixture/Cargo.lock
+
+# clangd writes an index cache beside the C fixture it indexes.
+crates/lspgraph-core/fixtures/c-fixture/.cache/
+# `go build` leaves the compiled binary beside the Go fixture's main package.
+crates/lspgraph-core/fixtures/go-fixture/gofixture
+# clangd's compile database for the C fixture embeds an absolute path, so the
+# integration test generates it at run time rather than committing one.
+crates/lspgraph-core/fixtures/c-fixture/compile_commands.json

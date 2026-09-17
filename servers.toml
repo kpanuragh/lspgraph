@@ -9,3 +9,11 @@ extensions = ["ts", "tsx"]
 [python]
 cmd = "basedpyright-langserver --stdio"
 extensions = ["py"]
+
+[go]
+cmd = "gopls"
+extensions = ["go"]
+
+[c]
+cmd = "clangd"
+extensions = ["c", "h"]

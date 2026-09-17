@@ -20,7 +20,36 @@ pub fn is_named_callable(name: &str, kind: SymbolKind) -> bool {
     if kind != SymbolKind::FUNCTION && kind != SymbolKind::METHOD {
         return false;
     }
-    let mut chars = name.chars();
+
+    // Servers qualify method names in their own ways, and all of them are real,
+    // findable methods: gopls returns `counter.bump` from `workspace/symbol`
+    // and `(*counter).bump` from `documentSymbol`. Strip a leading
+    // parenthesised receiver, then require every dot-separated segment to be a
+    // plain identifier.
+    //
+    // The segment rule is what keeps tsserver's synthesized callback names out:
+    // `_def.checks.find() callback` is dotted too, but its last segment carries
+    // parentheses and a space, so it still fails.
+    let rest = match name.strip_prefix('(') {
+        Some(after) => {
+            let Some(close) = after.find(')') else {
+                return false;
+            };
+            let receiver = after[..close].strip_prefix('*').unwrap_or(&after[..close]);
+            if !is_plain_identifier(receiver) {
+                return false;
+            }
+            after[close + 1..].strip_prefix('.').unwrap_or("")
+        }
+        None => name,
+    };
+
+    !rest.is_empty() && rest.split('.').all(is_plain_identifier)
+}
+
+/// A single unqualified identifier segment.
+fn is_plain_identifier(s: &str) -> bool {
+    let mut chars = s.chars();
     let Some(first) = chars.next() else {
         return false;
     };
@@ -72,6 +101,31 @@ mod tests {
             "z.custom() callback",
         ] {
             assert!(!is_named_callable(n, SymbolKind::FUNCTION), "should reject {n}");
+        }
+    }
+
+    #[test]
+    fn accepts_qualified_method_names() {
+        // gopls names a method `counter.bump` in workspace/symbol results and
+        // `(*counter).bump` in documentSymbol. Both are real, findable methods.
+        for n in ["counter.bump", "(*counter).bump", "(counter).bump", "pkg.Type.method"] {
+            assert!(is_named_callable(n, SymbolKind::METHOD), "should accept {n}");
+        }
+    }
+
+    #[test]
+    fn a_qualified_name_still_rejects_callback_noise() {
+        // The dotted-segment rule must not readmit tsserver's synthesized names,
+        // which also contain dots.
+        for n in ["_def.checks.find() callback", "patternKeys.map() callback", "z.custom() callback"] {
+            assert!(!is_named_callable(n, SymbolKind::FUNCTION), "should reject {n}");
+        }
+    }
+
+    #[test]
+    fn rejects_empty_segments_and_stray_punctuation() {
+        for n in [".bump", "counter.", "a..b", "(unclosed.bump", "()"] {
+            assert!(!is_named_callable(n, SymbolKind::METHOD), "should reject {n}");
         }
     }
 

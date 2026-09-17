@@ -28,7 +28,15 @@ Adding a language means adding a table to `servers.toml`. No code.
 | rust-analyzer | validated by integration tests against the real server |
 | vtsls | validated by integration tests against the real server |
 | basedpyright | validated by integration tests against the real server |
+| gopls | validated by integration tests against the real server |
+| clangd | validated by integration tests against the real server |
 | anything else implementing `callHierarchyProvider` | expected to work, untested |
+
+Two of these need something on the machine beyond the server itself. `gopls`
+shells out to the Go toolchain, so `go` must be on `PATH` or it will answer
+nothing — which surfaces as `NoCandidates`, not as a hang. `clangd` needs a
+`compile_commands.json` describing the project, the same way rust-analyzer
+needs a loadable Cargo manifest.
 
 Servers listed as untested are untested. They are not claimed to be supported.
 
