@@ -29,6 +29,13 @@ pub struct App {
     callers: Vec<Node>,
     callees: Vec<Node>,
     pending: Option<NodeId>,
+    /// The node whose expansion came back as a failure. Distinct from
+    /// `pending` (still loading) and from an empty resolved expansion
+    /// (genuinely no callers): all three must look different on screen.
+    failed: Option<NodeId>,
+    /// True once a search has actually been answered. Without it the very
+    /// first keystroke would render "no matches" before anything was asked.
+    searched: bool,
     history: Vec<Node>,
     pane: Pane,
     caller_sel: usize,
@@ -50,6 +57,8 @@ impl App {
             callers: Vec::new(),
             callees: Vec::new(),
             pending: None,
+            failed: None,
+            searched: false,
             history: Vec::new(),
             pane: Pane::Callers,
             caller_sel: 0,
@@ -86,6 +95,20 @@ impl App {
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }
+    /// True once a search has been answered, so the views can tell "nothing
+    /// asked yet" apart from "asked, and nothing matched".
+    pub fn searched(&self) -> bool {
+        self.searched
+    }
+    /// True when the focused node's expansion came back as a failure. The
+    /// views draw an explicit failure line rather than an empty list, which
+    /// would read as "this symbol has no callers".
+    pub fn expansion_failed(&self) -> bool {
+        match (self.failed.as_ref(), self.focus.as_ref()) {
+            (Some(id), Some(f)) => *id == f.id,
+            _ => false,
+        }
+    }
 
     pub fn dismiss_error(&mut self) {
         self.error = None;
@@ -96,10 +119,21 @@ impl App {
 
     pub fn push_query_char(&mut self, c: char) {
         self.query.push(c);
+        self.invalidate_matches();
     }
 
     pub fn pop_query_char(&mut self) {
         self.query.pop();
+        self.invalidate_matches();
+    }
+
+    /// Editing the query invalidates whatever the previous one returned: the
+    /// box and the result list must never disagree, and a stale match must
+    /// never be seedable behind a query that no longer describes it.
+    fn invalidate_matches(&mut self) {
+        self.matches.clear();
+        self.match_sel = 0;
+        self.searched = false;
     }
 
     /// Ask the worker to search. Returns None when the server cannot search,
@@ -153,6 +187,7 @@ impl App {
             Event::Matches(ms) => {
                 self.matches = ms;
                 self.match_sel = 0;
+                self.searched = true;
                 Vec::new()
             }
             Event::Seeded(Some(node)) => {
@@ -164,6 +199,7 @@ impl App {
                 self.caller_sel = 0;
                 self.callee_sel = 0;
                 self.pending = Some(id.clone());
+                self.failed = None;
                 vec![Request::Expand(id)]
             }
             Event::Seeded(None) => {
@@ -178,6 +214,7 @@ impl App {
                 // issues an `Expand`, so it is the current request's id.
                 if self.pending.as_ref() == Some(&id) {
                     self.pending = None;
+                    self.failed = None;
                     self.callers = exp.callers;
                     self.callees = exp.callees;
                     self.caller_sel = 0;
@@ -188,6 +225,10 @@ impl App {
             Event::Failed(id, why) => {
                 if self.pending.as_ref() == Some(&id) {
                     self.pending = None;
+                    // The panes were cleared when the request went out. Record
+                    // the failure so they say so instead of showing the empty
+                    // lists that mean "no callers".
+                    self.failed = Some(id.clone());
                 }
                 self.error = Some(format!("{}: {}", id.name, why));
                 Vec::new()
@@ -220,6 +261,7 @@ impl App {
         self.caller_sel = 0;
         self.callee_sel = 0;
         self.pending = Some(id.clone());
+        self.failed = None;
         Some(Request::Expand(id))
     }
 
@@ -232,6 +274,7 @@ impl App {
         self.caller_sel = 0;
         self.callee_sel = 0;
         self.pending = Some(id.clone());
+        self.failed = None;
         Some(Request::Expand(id))
     }
 
@@ -291,12 +334,18 @@ impl App {
         self.query.clear();
         self.matches.clear();
         self.match_sel = 0;
+        self.searched = false;
     }
 
-    /// Leaving search returns to the graph if one is open, otherwise stays put.
+    /// Leaving search returns to the graph if one is open. On the first
+    /// screen of a session there is nothing behind it, so esc is the user's
+    /// way out — quitting through the loop so the engine is shut down and the
+    /// terminal restored, rather than stranding them with no exit at all.
     pub fn leave_search(&mut self) {
         if self.focus.is_some() {
             self.screen = Screen::Graph;
+        } else {
+            self.should_quit = true;
         }
     }
 
@@ -558,6 +607,86 @@ mod tests {
     fn an_empty_query_is_not_submitted() {
         let mut a = a_ready(true);
         assert_eq!(a.submit_query(), None);
+    }
+
+    #[test]
+    fn editing_the_query_clears_the_previous_searchs_matches() {
+        // Otherwise `mid` -> 3 matches -> typing `dle` leaves the box reading
+        // `middle` while Enter seeds a match found for `mid`.
+        let mut a = a_ready(true);
+        a.push_query_char('m');
+        a.push_query_char('i');
+        a.push_query_char('d');
+        a.on_event(Event::Matches(vec![SymbolMatch {
+            name: "middle".into(),
+            container: None,
+            uri: lspgraph_core::server::path_to_uri(std::path::Path::new("/a.rs")),
+            position: Default::default(),
+            kind: lspgraph_core::symbols::function_kind(),
+        }]));
+        assert_eq!(a.matches().len(), 1);
+        assert!(a.searched());
+        a.push_query_char('d');
+        assert!(a.matches().is_empty(), "a stale match must not stay seedable");
+        assert_eq!(a.selected_match(), 0);
+        assert!(!a.searched(), "the new query has not been answered yet");
+        a.pop_query_char();
+        assert!(a.matches().is_empty());
+    }
+
+    #[test]
+    fn nothing_is_searched_until_a_result_arrives() {
+        let mut a = a_ready(true);
+        a.push_query_char('z');
+        assert!(!a.searched(), "typing is not searching");
+        a.on_event(Event::Matches(vec![]));
+        assert!(a.searched());
+    }
+
+    #[test]
+    fn a_failed_expansion_is_distinguishable_from_an_empty_one() {
+        let mut a = a_ready(true);
+        a.on_event(seeded("f"));
+        assert!(a.is_pending());
+        assert!(!a.expansion_failed());
+        a.on_event(Event::Failed(nid("f"), "boom".into()));
+        assert!(!a.is_pending(), "a failure resolves the request");
+        assert!(
+            a.expansion_failed(),
+            "the panes are empty, so the failure must be recorded"
+        );
+        assert!(a.callers().is_empty());
+    }
+
+    #[test]
+    fn a_new_expansion_clears_the_previous_failure() {
+        let mut a = a_ready(true);
+        a.on_event(seeded("f"));
+        a.on_event(Event::Failed(nid("f"), "boom".into()));
+        assert!(a.expansion_failed());
+        a.on_event(seeded("g"));
+        assert!(!a.expansion_failed(), "a new request starts clean");
+        a.on_event(expanded("g", &[], &[]));
+        assert!(!a.expansion_failed());
+    }
+
+    #[test]
+    fn esc_on_the_first_search_screen_quits() {
+        // Nothing is behind the first search screen, so "return to the graph"
+        // has no meaning: esc must be a way out, not a no-op.
+        let mut a = a_ready(true);
+        a.leave_search();
+        assert!(a.should_quit);
+    }
+
+    #[test]
+    fn esc_with_a_graph_behind_it_returns_to_the_graph() {
+        let mut a = a_ready(true);
+        a.on_event(seeded("f"));
+        a.enter_search();
+        a.leave_search();
+        assert_eq!(a.screen(), Screen::Graph);
+        assert!(!a.should_quit);
     }
 
     #[test]

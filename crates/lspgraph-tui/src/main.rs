@@ -113,5 +113,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = qtx.send(Request::Shutdown);
     drop(qtx);
     let _ = handle.join();
-    res
+    // A startup or draw failure still surfaces first and on its own terms.
+    res?;
+    // A `Fatal` sets both `error` and `should_quit` in the same drain, so the
+    // loop returns before it can be drawn and `restore()` then wipes the
+    // alternate screen. Without this the session would vanish with no
+    // explanation and an exit status of 0.
+    if let Some(e) = app.error() {
+        eprintln!("lspgraph: {e}");
+        std::process::exit(1);
+    }
+    Ok(())
 }

@@ -39,7 +39,10 @@ pub fn draw_search(f: &mut Frame, area: Rect, app: &App) {
         return;
     }
 
-    if !app.query().is_empty() && app.matches().is_empty() {
+    // Only after a search has actually been answered: keying off the query
+    // alone tells the user "no matches" on their first keystroke, before
+    // anything has been asked.
+    if app.searched() && app.matches().is_empty() {
         f.render_widget(
             Paragraph::new(NO_MATCHES_MSG)
                 .block(Block::default().borders(Borders::ALL)),
@@ -136,6 +139,34 @@ mod tests {
         assert!(
             out.contains(NO_MATCHES_MSG),
             "an empty list must not look authoritative:\n{out}"
+        );
+    }
+
+    #[test]
+    fn typing_without_submitting_does_not_claim_there_are_no_matches() {
+        let mut a = App::new();
+        a.on_event(Event::Ready { can_search: true });
+        a.push_query_char('z');
+        a.push_query_char('e');
+        let out = rendered(&a);
+        assert!(
+            !out.contains(NO_MATCHES_MSG),
+            "nothing has been searched for yet:\n{out}"
+        );
+    }
+
+    #[test]
+    fn editing_the_query_after_a_search_stops_claiming_there_are_no_matches() {
+        let mut a = App::new();
+        a.on_event(Event::Ready { can_search: true });
+        a.push_query_char('z');
+        a.on_event(Event::Matches(vec![]));
+        assert!(rendered(&a).contains(NO_MATCHES_MSG));
+        a.push_query_char('e');
+        let out = rendered(&a);
+        assert!(
+            !out.contains(NO_MATCHES_MSG),
+            "the new query has not been answered:\n{out}"
         );
     }
 

@@ -13,6 +13,13 @@ use ratatui::Frame;
 pub const UNRESOLVED_MARK: &str = "⊘";
 const SPINNER: &str = "…";
 
+/// Shown in both side panes when an expansion came back as a failure. The
+/// panes are empty either way, and an empty list is this interface's way of
+/// saying "this symbol genuinely has no callers" — so a failure has to say
+/// so itself, or a transient server error teaches the user something false.
+pub const FAILED_LINE: &str = "expansion failed";
+pub const FAILED_HINT: &str = "u to go back";
+
 pub fn label(n: &Node) -> String {
     match n.state {
         NodeState::Unresolved(_) => format!("{UNRESOLVED_MARK} {}", n.id.name),
@@ -55,6 +62,7 @@ pub fn draw_graph(f: &mut Frame, area: Rect, app: &App) {
         .split(rows[1]);
 
     let pending = app.is_pending();
+    let failed = app.expansion_failed();
 
     let side = |title: &str, nodes: &[Node], active: bool, sel: usize| {
         let border = if active {
@@ -64,6 +72,8 @@ pub fn draw_graph(f: &mut Frame, area: Rect, app: &App) {
         };
         let items: Vec<ListItem> = if pending {
             vec![ListItem::new(SPINNER)]
+        } else if failed {
+            vec![ListItem::new(FAILED_LINE), ListItem::new(FAILED_HINT)]
         } else {
             nodes
                 .iter()
@@ -225,6 +235,60 @@ mod tests {
             state: NodeState::Unresolved(UnresolvedReason::NoCallHierarchyItem),
         };
         assert!(label(&n).starts_with(UNRESOLVED_MARK));
+    }
+
+    #[test]
+    fn an_unresolved_node_is_marked_in_the_rendered_pane() {
+        // Spec §7 names the marker as something that must be tested through
+        // the render path, not only on `label()`.
+        let mut a = App::new();
+        a.on_event(Event::Ready { can_search: true });
+        a.on_event(Event::Seeded(Some(node("f"))));
+        let mut over = node("over");
+        over.state = NodeState::Unresolved(UnresolvedReason::NoCallHierarchyItem);
+        a.on_event(Event::Expanded(
+            nid("f"),
+            ResolvedExpansion { callers: vec![over], callees: vec![] },
+        ));
+        let out = rendered(&a);
+        assert!(
+            out.contains(UNRESOLVED_MARK),
+            "an unresolved node must be marked on screen, never quietly hidden:\n{out}"
+        );
+    }
+
+    #[test]
+    fn a_failed_expansion_looks_like_neither_pending_nor_empty() {
+        let mut pend = App::new();
+        pend.on_event(Event::Ready { can_search: true });
+        pend.on_event(Event::Seeded(Some(node("middle"))));
+        let pending_out = rendered(&pend);
+
+        let mut empty = App::new();
+        empty.on_event(Event::Ready { can_search: true });
+        empty.on_event(Event::Seeded(Some(node("middle"))));
+        empty.on_event(Event::Expanded(
+            nid("middle"),
+            ResolvedExpansion { callers: vec![], callees: vec![] },
+        ));
+        let empty_out = rendered(&empty);
+
+        let mut fail = App::new();
+        fail.on_event(Event::Ready { can_search: true });
+        fail.on_event(Event::Seeded(Some(node("middle"))));
+        fail.on_event(Event::Failed(nid("middle"), "content modified".into()));
+        fail.dismiss_error(); // the overlay is dismissed; the panes remain
+        let failed_out = rendered(&fail);
+
+        assert!(
+            failed_out.contains(FAILED_LINE),
+            "a failed expansion must say so:\n{failed_out}"
+        );
+        assert!(!failed_out.contains(SPINNER), "a failure is not still loading");
+        assert!(!empty_out.contains(FAILED_LINE));
+        assert!(!pending_out.contains(FAILED_LINE));
+        assert_ne!(failed_out, empty_out, "failed must not look like no-callers");
+        assert_ne!(failed_out, pending_out, "failed must not look like loading");
     }
 
     #[test]
