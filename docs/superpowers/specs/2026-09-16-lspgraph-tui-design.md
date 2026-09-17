@@ -85,8 +85,7 @@ Request ────────────────────────
                                     Expand(NodeId)
                                     Restart
                                     Shutdown
-◄────────────────────────── Event   Progress(String)
-                                    Ready
+◄────────────────────────── Event   Ready
                                     Matches(Vec<SymbolMatch>)
                                     Seeded(Option<NodeId>)
                                     Expanded(NodeId, Expansion)
@@ -109,11 +108,18 @@ processes.
 
 A three-state machine:
 
-- **Starting** — server spawning and readiness polling. Shows the progress
-  messages the worker forwards. This state can legitimately last 15 seconds,
-  and around 28s on a first-ever open of a Rust project, so it must show what
-  it is waiting for rather than an undifferentiated spinner — a silent 28-second
-  wait is indistinguishable from a hang.
+- **Starting** — server spawning and readiness polling run before the
+  terminal is taken over, so the wait is reported on the ordinary terminal
+  and stays interruptible with Ctrl-C. This is deliberate: a startup failure
+  then prints plainly instead of being swallowed by the alternate screen,
+  and a wait that can legitimately reach ~28s on a first-ever open of a Rust
+  project stays abortable rather than becoming a silent, undifferentiated
+  hang. `Screen::Starting` therefore exists only as a brief transient before
+  the worker's first `Ready` arrives, and shows a static message rather than
+  forwarded progress. (If startup is ever moved inside the TUI, a progress
+  event must be reinstated and `Screen::Starting` must gain a key to abort
+  it — otherwise a slow start becomes unabortable, since that screen
+  swallows all keys.)
 - **Search** — a query box and a live result list.
 - **Graph** — the three-pane view below.
 
