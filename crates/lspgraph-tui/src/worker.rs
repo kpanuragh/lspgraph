@@ -241,7 +241,7 @@ mod tests {
         qtx.send(Request::Seed(SymbolMatch {
             name: "f".into(),
             container: None,
-            uri: lspgraph_core::server::path_to_uri(std::path::Path::new("/a.rs")),
+            uri: lspgraph_core::server::path_to_uri(&std::env::temp_dir().join("a.rs")),
             position: Default::default(),
             kind: lspgraph_core::symbols::function_kind(),
         }))

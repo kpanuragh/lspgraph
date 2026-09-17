@@ -192,10 +192,21 @@ mod tests {
     /// A fake server: reads framed requests, replies per a canned table.
     struct Duplex {
         to_client: Cursor<Vec<u8>>,
+        delivered: bool,
     }
 
     impl Read for Duplex {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            // The reader thread starts as soon as `Connection::new` returns,
+            // and canned bytes are available immediately. Without this delay
+            // it can race `Connection::request` and remove-and-send a
+            // response before `request` has registered the id it is
+            // replying to, silently dropping the response and leaving the
+            // caller to time out instead of seeing the canned answer.
+            if !self.delivered {
+                self.delivered = true;
+                std::thread::sleep(Duration::from_millis(50));
+            }
             self.to_client.read(buf)
         }
     }
@@ -207,6 +218,7 @@ mod tests {
         }
         Duplex {
             to_client: Cursor::new(bytes),
+            delivered: false,
         }
     }
 
