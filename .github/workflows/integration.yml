@@ -1,0 +1,94 @@
+name: Integration (real language servers)
+
+# Deliberately not on pull_request. Two intermittent failures were observed
+# during development and never reproduced; a suite that fails unpredictably
+# must not block merges, because that trains everyone to re-run until green.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-analyzer
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Install language servers
+        run: |
+          set -euxo pipefail
+          npm install -g @vtsls/language-server
+          pip install basedpyright
+          go install golang.org/x/tools/gopls@latest
+          sudo apt-get update
+          sudo apt-get install -y clangd
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: Record server versions
+        run: |
+          set -x
+          rust-analyzer --version
+          vtsls --version || true
+          basedpyright-langserver --version || true
+          "$HOME/go/bin/gopls" version
+          clangd --version
+          go version
+
+      - name: Write the CI server configuration
+        run: |
+          cat > servers.ci.toml <<'TOML'
+          [rust]
+          cmd = "rust-analyzer"
+          extensions = ["rs"]
+
+          [typescript]
+          cmd = "vtsls --stdio"
+          extensions = ["ts", "tsx"]
+
+          [python]
+          cmd = "basedpyright-langserver --stdio"
+          extensions = ["py"]
+
+          [go]
+          cmd = "gopls"
+          extensions = ["go"]
+
+          [c]
+          cmd = "clangd"
+          extensions = ["c", "h"]
+          TOML
+
+      # --test-threads=1 because five servers starting at once contend for CPU
+      # and make timings unreliable. --nocapture and tee because the whole
+      # point of this workflow is that a failure leaves evidence behind.
+      - name: Integration suite
+        env:
+          LSPGRAPH_SERVERS_TOML: servers.ci.toml
+        run: |
+          set -o pipefail
+          cargo test -p lspgraph-core --test integration_servers -- \
+            --test-threads=1 --nocapture 2>&1 | tee integration.log
+
+      - name: Upload the full log when it fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-log
+          path: integration.log
+          retention-days: 30
