@@ -102,6 +102,41 @@ impl App {
         self.pane
     }
 
+    pub fn push_query_char(&mut self, c: char) {
+        self.query.push(c);
+    }
+
+    pub fn pop_query_char(&mut self) {
+        self.query.pop();
+    }
+
+    /// Ask the worker to search. Returns None when the server cannot search,
+    /// so the caller can leave the explanatory message on screen.
+    pub fn submit_query(&mut self) -> Option<Request> {
+        if !self.can_search || self.query.is_empty() {
+            return None;
+        }
+        Some(Request::Search(self.query.clone()))
+    }
+
+    pub fn select_match_next(&mut self) {
+        if !self.matches.is_empty() {
+            self.match_sel = (self.match_sel + 1).min(self.matches.len() - 1);
+        }
+    }
+
+    pub fn select_match_prev(&mut self) {
+        self.match_sel = self.match_sel.saturating_sub(1);
+    }
+
+    pub fn selected_match(&self) -> usize {
+        self.match_sel
+    }
+
+    pub fn chosen_match(&mut self) -> Option<Request> {
+        self.matches.get(self.match_sel).cloned().map(Request::Seed)
+    }
+
     /// True while the focused node's expansion is still in flight. The views
     /// use this to draw a spinner instead of an empty list.
     pub fn is_pending(&self) -> bool {
@@ -287,6 +322,12 @@ mod tests {
             detail: None,
             state,
         }
+    }
+
+    fn a_ready(can_search: bool) -> App {
+        let mut a = App::new();
+        a.on_event(Event::Ready { can_search });
+        a
     }
 
     #[test]
@@ -515,5 +556,28 @@ mod tests {
             a.is_pending(),
             "f's own expansion has not arrived; the stale reply for up must not be mistaken for it"
         );
+    }
+
+    #[test]
+    fn typing_builds_a_query_and_submits_it() {
+        let mut a = a_ready(true);
+        a.push_query_char('s');
+        a.push_query_char('e');
+        a.pop_query_char();
+        assert_eq!(a.query(), "s");
+        assert_eq!(a.submit_query(), Some(Request::Search("s".into())));
+    }
+
+    #[test]
+    fn a_server_that_cannot_search_never_issues_a_search() {
+        let mut a = a_ready(false);
+        a.push_query_char('s');
+        assert_eq!(a.submit_query(), None, "must not send a doomed request");
+    }
+
+    #[test]
+    fn an_empty_query_is_not_submitted() {
+        let mut a = a_ready(true);
+        assert_eq!(a.submit_query(), None);
     }
 }
