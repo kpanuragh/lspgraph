@@ -1,4 +1,5 @@
 mod app;
+mod keys;
 mod protocol;
 mod ui;
 mod worker;

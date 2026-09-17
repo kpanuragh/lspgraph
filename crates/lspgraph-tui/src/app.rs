@@ -297,6 +297,20 @@ impl App {
         }
     }
 
+    pub fn enter_search(&mut self) {
+        self.screen = Screen::Search;
+        self.query.clear();
+        self.matches.clear();
+        self.match_sel = 0;
+    }
+
+    /// Leaving search returns to the graph if one is open, otherwise stays put.
+    pub fn leave_search(&mut self) {
+        if self.focus.is_some() {
+            self.screen = Screen::Graph;
+        }
+    }
+
     #[cfg(test)]
     pub fn set_focus_for_test(&mut self, n: Node) {
         self.focus = Some(n);
