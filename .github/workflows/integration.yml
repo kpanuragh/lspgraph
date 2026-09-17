@@ -7,11 +7,6 @@ on:
   schedule:
     - cron: "0 3 * * *"
   workflow_dispatch:
-  # TEMPORARY: removed before merge. Exists only so this workflow can be
-  # verified from the branch — workflow_dispatch does not register until the
-  # file is on the default branch.
-  push:
-    branches: [ci/add-workflows]
 
 env:
   CARGO_TERM_COLOR: always
