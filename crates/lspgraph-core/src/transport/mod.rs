@@ -366,12 +366,18 @@ mod tests {
     #[test]
     fn reader_death_resolves_inflight_requests_as_server_exited() {
         let (data_tx, data_rx) = channel::<Option<Vec<u8>>>();
-        let conn = Connection::new(BlockingReader(data_rx), Vec::new());
+        let writer = Tee::default();
+        let handshake = writer.handshake.clone();
+        let conn = Connection::new(BlockingReader(data_rx), writer);
 
         // Trigger EOF (via a helper thread that only owns the data-channel
-        // sender, not the Connection) shortly after the request is issued.
+        // sender, not the Connection) once the request has actually been
+        // written, rather than after a fixed delay that could fire before
+        // `request` has registered its pending id — which would make the
+        // reader's EOF race an empty map and leave `request` waiting out
+        // its full timeout instead of failing fast.
         std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(50));
+            handshake.wait();
             let _ = data_tx.send(None);
         });
 
