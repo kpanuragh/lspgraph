@@ -36,7 +36,7 @@ first two:
 
 - Every pull request gets unit tests, lint and formatting checked on Linux,
   macOS and Windows.
-- The deliberate MSRV split is enforced rather than assumed.
+- The declared MSRV is enforced rather than assumed.
 - The five-server integration suite runs on a schedule, and its failures are
   diagnosable.
 - A tagged release produces working binaries for five targets, with checksums.
@@ -77,18 +77,27 @@ cargo clippy --workspace --all-targets -- -D warnings
 Clippy is currently clean workspace-wide, so `-D warnings` starts from a clean
 slate rather than needing a grandfathering list.
 
-**msrv** — `ubuntu-latest`, Rust 1.75:
+**msrv** — `ubuntu-latest`, Rust 1.88:
 
 ```
-cargo check -p lspgraph-core
+cargo check --workspace
 ```
 
-`lspgraph-core` declares `rust-version = "1.75"` and `lspgraph-tui` declares
-1.88, because ratatui 0.30 requires it. That split is a deliberate design
-decision — the engine stays usable by consumers on older toolchains — and
-**nothing currently verifies it.** A dependency bump in the engine could raise
-its real MSRV silently, and the manifest would keep claiming 1.75. This job is
-the only thing that would catch that.
+The workspace declares `rust-version = "1.88"`, and this job is what keeps that
+number true.
+
+It was written before the number was checked, and checking it found the claim
+false. The manifests previously declared 1.75 for the engine and 1.88 only for
+the interface, on the reasoning that the engine should stay usable by consumers
+on older toolchains. That reasoning did not survive contact with the dependency
+tree: `lspgraph-core` depends on `lsp-types`, which depends on `url`, which
+pulls in `idna` and the `icu_*` crates — and those require rustc 1.88. The
+engine never built on 1.75 once that chain landed, so the split was cosmetic and
+the declared floor was simply wrong.
+
+The workspace now declares one MSRV, 1.88, which is the truth. That is precisely
+the class of silent drift this job exists to catch; it caught it before it
+existed.
 
 ### 4.2 `integration.yml` — scheduled and manual
 

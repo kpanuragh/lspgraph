@@ -215,6 +215,12 @@ mislead the user rather than break anything.
 `ratatui` and `crossterm`, plus `lspgraph-core`. Nothing else. The engine's
 no-async-runtime constraint carries over unchanged.
 
+This crate originally declared its own MSRV of 1.88 for ratatui 0.30, on the
+reasoning that the engine could stay at 1.75 and remain usable by consumers on
+older toolchains. That was later measured and found false: `lspgraph-core`
+reaches rustc 1.88 anyway through `lsp-types` → `url` → `idna` → `icu_*`. The
+split was cosmetic, and the workspace now declares a single MSRV of 1.88.
+
 ## 9. Non-goals for v0.1
 
 Explicitly out of scope: editor integration of any kind, mouse support,
