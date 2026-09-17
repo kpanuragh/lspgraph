@@ -67,7 +67,9 @@ impl Decoder {
             Some(l) => l,
             None => {
                 self.buf.drain(..header_end + 4);
-                return Err(Error::Protocol("no Content-Length header found".to_string()));
+                return Err(Error::Protocol(
+                    "no Content-Length header found".to_string(),
+                ));
             }
         };
 
@@ -148,7 +150,10 @@ mod tests {
         d.push(b"invalid line\r\n\r\n");
         let result = d.next_message();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("header line without colon"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("header line without colon"));
 
         // After error, buffer is drained and a new message can be decoded
         d.push(&encode(b"{\"a\":1}"));
@@ -161,7 +166,10 @@ mod tests {
         d.push(b"content-type: application/json\r\n\r\n{}");
         let result = d.next_message();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("no Content-Length header found"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no Content-Length header found"));
     }
 
     #[test]
@@ -172,6 +180,9 @@ mod tests {
         d.push(&invalid);
         let result = d.next_message();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("invalid UTF-8 in header"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("invalid UTF-8 in header"));
     }
 }

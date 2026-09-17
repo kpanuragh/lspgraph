@@ -123,7 +123,12 @@ impl Connection {
             }
         });
 
-        Connection { writer, pending, next_id: AtomicI64::new(0), notifications }
+        Connection {
+            writer,
+            pending,
+            next_id: AtomicI64::new(0),
+            notifications,
+        }
     }
 
     pub fn request(&self, method: &str, params: Value, timeout: Duration) -> Result<Value> {
@@ -139,16 +144,24 @@ impl Connection {
                 if let Some(e) = m.get("error") {
                     let code = e.get("code").and_then(|v| v.as_i64());
                     if code == Some(-32801) {
-                        return Err(Error::ContentModified { method: method.to_string() });
+                        return Err(Error::ContentModified {
+                            method: method.to_string(),
+                        });
                     }
-                    let text = e.get("message").and_then(|v| v.as_str()).unwrap_or("unknown");
+                    let text = e
+                        .get("message")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
                     return Err(Error::Protocol(format!("{method}: {text}")));
                 }
                 Ok(m.get("result").cloned().unwrap_or(Value::Null))
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 self.pending.lock().unwrap().remove(&id);
-                Err(Error::Timeout { method: method.to_string(), timeout })
+                Err(Error::Timeout {
+                    method: method.to_string(),
+                    timeout,
+                })
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(Error::ServerExited),
         }
@@ -192,7 +205,9 @@ mod tests {
         for m in messages {
             bytes.extend_from_slice(&codec::encode(serde_json::to_string(m).unwrap().as_bytes()));
         }
-        Duplex { to_client: Cursor::new(bytes) }
+        Duplex {
+            to_client: Cursor::new(bytes),
+        }
     }
 
     /// A reader whose `read` blocks on a channel, so a test controls exactly
@@ -217,7 +232,9 @@ mod tests {
     fn resolves_a_response_by_id() {
         let server = canned(&[json!({"jsonrpc":"2.0","id":1,"result":{"ok":true}})]);
         let conn = Connection::new(server, Vec::new());
-        let got = conn.request("x", json!({}), Duration::from_secs(2)).unwrap();
+        let got = conn
+            .request("x", json!({}), Duration::from_secs(2))
+            .unwrap();
         assert_eq!(got, json!({"ok": true}));
     }
 
@@ -227,7 +244,9 @@ mod tests {
             json!({"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"no such method"}}),
         ]);
         let conn = Connection::new(server, Vec::new());
-        let err = conn.request("x", json!({}), Duration::from_secs(2)).unwrap_err();
+        let err = conn
+            .request("x", json!({}), Duration::from_secs(2))
+            .unwrap_err();
         assert!(matches!(err, Error::Protocol(m) if m.contains("no such method")));
     }
 
@@ -237,7 +256,9 @@ mod tests {
             json!({"jsonrpc":"2.0","id":1,"error":{"code":-32801,"message":"content modified"}}),
         ]);
         let conn = Connection::new(server, Vec::new());
-        let err = conn.request("x", json!({}), Duration::from_secs(2)).unwrap_err();
+        let err = conn
+            .request("x", json!({}), Duration::from_secs(2))
+            .unwrap_err();
         assert!(matches!(err, Error::ContentModified { method } if method == "x"));
     }
 
@@ -247,7 +268,9 @@ mod tests {
             json!({"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"no such method"}}),
         ]);
         let conn = Connection::new(server, Vec::new());
-        let err = conn.request("x", json!({}), Duration::from_secs(2)).unwrap_err();
+        let err = conn
+            .request("x", json!({}), Duration::from_secs(2))
+            .unwrap_err();
         assert!(matches!(err, Error::Protocol(_)));
     }
 
@@ -257,7 +280,10 @@ mod tests {
             json!({"jsonrpc":"2.0","method":"window/logMessage","params":{"message":"hi"}}),
         ]);
         let conn = Connection::new(server, Vec::new());
-        let n = conn.notifications().recv_timeout(Duration::from_secs(2)).unwrap();
+        let n = conn
+            .notifications()
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
         assert_eq!(n.method, "window/logMessage");
     }
 
@@ -267,7 +293,9 @@ mod tests {
         // deterministically rather than racing a from-EOF `ServerExited`.
         let (_data_tx, data_rx) = channel::<Option<Vec<u8>>>();
         let conn = Connection::new(BlockingReader(data_rx), Vec::new());
-        let err = conn.request("x", json!({}), Duration::from_millis(80)).unwrap_err();
+        let err = conn
+            .request("x", json!({}), Duration::from_millis(80))
+            .unwrap_err();
         assert!(matches!(err, Error::Timeout { .. }));
     }
 
@@ -318,11 +346,16 @@ mod tests {
         ]);
         let written = Arc::new(Mutex::new(Vec::<u8>::new()));
         let conn = Connection::new(server, Tee(written.clone()));
-        let got = conn.request("x", json!({}), Duration::from_secs(2)).unwrap();
+        let got = conn
+            .request("x", json!({}), Duration::from_secs(2))
+            .unwrap();
         assert_eq!(got, json!("after"));
 
         let sent = String::from_utf8(written.lock().unwrap().clone()).unwrap();
-        assert!(sent.contains("\"id\":99"), "must reply to server request 99: {sent}");
+        assert!(
+            sent.contains("\"id\":99"),
+            "must reply to server request 99: {sent}"
+        );
     }
 
     #[test]
@@ -336,7 +369,9 @@ mod tests {
         ]);
         let written = Arc::new(Mutex::new(Vec::<u8>::new()));
         let conn = Connection::new(server, Tee(written.clone()));
-        let got = conn.request("x", json!({}), Duration::from_secs(2)).unwrap();
+        let got = conn
+            .request("x", json!({}), Duration::from_secs(2))
+            .unwrap();
         assert_eq!(got, json!("after"));
 
         let sent = String::from_utf8(written.lock().unwrap().clone()).unwrap();
@@ -366,6 +401,9 @@ mod tests {
             .recv_timeout(Duration::from_secs(2))
             .unwrap();
         assert_eq!(n.method, "window/logMessage");
-        assert!(written.lock().unwrap().is_empty(), "nothing should be replied");
+        assert!(
+            written.lock().unwrap().is_empty(),
+            "nothing should be replied"
+        );
     }
 }

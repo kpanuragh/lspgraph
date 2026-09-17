@@ -4,9 +4,7 @@ use crate::config::ServerConfig;
 use crate::error::{Error, Result};
 use crate::symbols::SymbolMatch;
 use crate::transport::Connection;
-use lsp_types::{
-    CallHierarchyItem, DocumentSymbol, Position, Url,
-};
+use lsp_types::{CallHierarchyItem, DocumentSymbol, Position, Url};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -122,7 +120,9 @@ impl LanguageServer {
             .map(|v| v != &Value::Bool(false) && !v.is_null())
             .unwrap_or(false);
         if !supported {
-            return Err(Error::NoCallHierarchy { server: name.to_string() });
+            return Err(Error::NoCallHierarchy {
+                server: name.to_string(),
+            });
         }
 
         let supports_workspace_symbol = caps
@@ -259,7 +259,9 @@ impl LanguageServer {
     /// Taking the `Child` here leaves `Drop` with nothing to do, so calling
     /// `shutdown()` and then dropping neither double-kills nor panics.
     pub fn shutdown(mut self) -> Result<()> {
-        let _ = self.conn.request("shutdown", Value::Null, Duration::from_secs(5));
+        let _ = self
+            .conn
+            .request("shutdown", Value::Null, Duration::from_secs(5));
         let _ = self.conn.notify("exit", Value::Null);
         Self::kill_and_reap(&mut self.child);
         Ok(())
@@ -365,7 +367,10 @@ mod tests {
             // would otherwise accumulate one full language server per switch.
             let script = long_lived_script("drop-leak");
             let server = script.start().expect("fake server initializes");
-            assert!(script.is_running(), "fake server should be up before the drop");
+            assert!(
+                script.is_running(),
+                "fake server should be up before the drop"
+            );
 
             drop(server);
 
@@ -383,7 +388,10 @@ mod tests {
             let script = long_lived_script("engine-drop-leak");
             let server = script.start().expect("fake server initializes");
             let engine = crate::engine::Engine::new(server);
-            assert!(script.is_running(), "fake server should be up before the drop");
+            assert!(
+                script.is_running(),
+                "fake server should be up before the drop"
+            );
 
             drop(engine);
 

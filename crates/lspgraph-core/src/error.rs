@@ -30,7 +30,10 @@ pub enum Error {
     NotReady { timeout: Duration, tried: usize },
 
     #[error("no candidate symbols found: {files_attempted} files examined, {files_failed} of them failed to respond")]
-    NoCandidates { files_attempted: usize, files_failed: usize },
+    NoCandidates {
+        files_attempted: usize,
+        files_failed: usize,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

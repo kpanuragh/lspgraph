@@ -55,7 +55,9 @@ pub fn spawn_worker(
     tx: Sender<Event>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
-        let _ = tx.send(Event::Ready { can_search: engine.can_search() });
+        let _ = tx.send(Event::Ready {
+            can_search: engine.can_search(),
+        });
 
         // `recv` ending means the UI thread is gone; fall through and shut the
         // engine down rather than leaking a language server.
@@ -131,7 +133,12 @@ mod tests {
     }
 
     fn id(name: &str) -> NodeId {
-        NodeId { uri: "file:///a.rs".into(), line: 1, character: 3, name: name.into() }
+        NodeId {
+            uri: "file:///a.rs".into(),
+            line: 1,
+            character: 3,
+            name: name.into(),
+        }
     }
 
     impl EngineOps for Stub {
@@ -154,7 +161,10 @@ mod tests {
                 return Err(lspgraph_core::Error::Protocol("nope".into()));
             }
             let _ = node;
-            Ok(Expansion { callers: vec![id("caller")], callees: vec![id("callee")] })
+            Ok(Expansion {
+                callers: vec![id("caller")],
+                callees: vec![id("callee")],
+            })
         }
         fn node(&self, node: &NodeId) -> Option<Node> {
             Some(Node {
@@ -180,7 +190,14 @@ mod tests {
     fn announces_ready_with_search_availability() {
         let (_qtx, qrx) = channel();
         let (etx, erx) = channel();
-        let h = spawn_worker(Box::new(Stub { can_search: true, ..Default::default() }), qrx, etx);
+        let h = spawn_worker(
+            Box::new(Stub {
+                can_search: true,
+                ..Default::default()
+            }),
+            qrx,
+            etx,
+        );
         assert_eq!(recv(&erx), Event::Ready { can_search: true });
         drop(_qtx);
         h.join().unwrap();
@@ -210,7 +227,10 @@ mod tests {
         let (qtx, qrx) = channel();
         let (etx, erx) = channel();
         let h = spawn_worker(
-            Box::new(Stub { fail_expand: true, ..Default::default() }),
+            Box::new(Stub {
+                fail_expand: true,
+                ..Default::default()
+            }),
             qrx,
             etx,
         );
@@ -236,7 +256,10 @@ mod tests {
         let (qtx, qrx) = channel();
         let (etx, erx) = channel();
         let h = spawn_worker(
-            Box::new(Stub { fail_search: true, ..Default::default() }),
+            Box::new(Stub {
+                fail_search: true,
+                ..Default::default()
+            }),
             qrx,
             etx,
         );
@@ -259,14 +282,20 @@ mod tests {
         let (qtx, qrx) = channel();
         let (etx, erx) = channel();
         let h = spawn_worker(
-            Box::new(Stub { shutdown_flag: Some(flag.clone()), ..Default::default() }),
+            Box::new(Stub {
+                shutdown_flag: Some(flag.clone()),
+                ..Default::default()
+            }),
             qrx,
             etx,
         );
         let _ = recv(&erx);
         qtx.send(Request::Shutdown).unwrap();
         h.join().unwrap();
-        assert!(flag.load(std::sync::atomic::Ordering::SeqCst), "engine was not shut down");
+        assert!(
+            flag.load(std::sync::atomic::Ordering::SeqCst),
+            "engine was not shut down"
+        );
     }
 
     #[test]
@@ -275,7 +304,10 @@ mod tests {
         let (qtx, qrx) = channel();
         let (etx, erx) = channel();
         let h = spawn_worker(
-            Box::new(Stub { shutdown_flag: Some(flag.clone()), ..Default::default() }),
+            Box::new(Stub {
+                shutdown_flag: Some(flag.clone()),
+                ..Default::default()
+            }),
             qrx,
             etx,
         );
@@ -292,13 +324,19 @@ mod tests {
         let (qtx, qrx) = channel();
         let (etx, erx) = channel();
         let h = spawn_worker(
-            Box::new(Stub { shutdown_flag: Some(flag.clone()), ..Default::default() }),
+            Box::new(Stub {
+                shutdown_flag: Some(flag.clone()),
+                ..Default::default()
+            }),
             qrx,
             etx,
         );
         let _ = recv(&erx);
         drop(qtx); // UI thread died without saying goodbye
         h.join().unwrap();
-        assert!(flag.load(std::sync::atomic::Ordering::SeqCst), "engine leaked on channel drop");
+        assert!(
+            flag.load(std::sync::atomic::Ordering::SeqCst),
+            "engine leaked on channel drop"
+        );
     }
 }

@@ -105,10 +105,20 @@ mod tests {
     use ratatui::crossterm::event::KeyCode;
 
     fn nid(name: &str) -> NodeId {
-        NodeId { uri: "file:///a.rs".into(), line: 1, character: 3, name: name.into() }
+        NodeId {
+            uri: "file:///a.rs".into(),
+            line: 1,
+            character: 3,
+            name: name.into(),
+        }
     }
     fn node(name: &str) -> Node {
-        Node { id: nid(name), kind_name: "Function".into(), detail: None, state: NodeState::Unexpanded }
+        Node {
+            id: nid(name),
+            kind_name: "Function".into(),
+            detail: None,
+            state: NodeState::Unexpanded,
+        }
     }
     fn k(code: KeyCode) -> KeyEvent {
         KeyEvent::from(code)
@@ -123,7 +133,10 @@ mod tests {
         a.on_event(Event::Seeded(Some(node("f"))));
         a.on_event(Event::Expanded(
             nid("f"),
-            ResolvedExpansion { callers: vec![node("up")], callees: vec![node("down")] },
+            ResolvedExpansion {
+                callers: vec![node("up")],
+                callees: vec![node("down")],
+            },
         ));
         a
     }
@@ -163,7 +176,10 @@ mod tests {
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: true });
         handle_key(&mut a, k(KeyCode::Char('q')));
-        assert!(!a.should_quit, "'q' is a query character in search, not a quit");
+        assert!(
+            !a.should_quit,
+            "'q' is a query character in search, not a quit"
+        );
         assert_eq!(a.query(), "q");
     }
 
@@ -185,7 +201,10 @@ mod tests {
         a.on_event(Event::Ready { can_search: true });
         assert_eq!(a.screen(), Screen::Search);
         handle_key(&mut a, k(KeyCode::Esc));
-        assert!(a.should_quit, "esc must be an exit when nothing is behind it");
+        assert!(
+            a.should_quit,
+            "esc must be an exit when nothing is behind it"
+        );
     }
 
     #[test]
@@ -199,7 +218,10 @@ mod tests {
         search.on_event(Event::Ready { can_search: true });
         assert_eq!(search.screen(), Screen::Search);
         handle_key(&mut search, ctrl('c'));
-        assert!(search.should_quit, "ctrl-c must not be typed into the query");
+        assert!(
+            search.should_quit,
+            "ctrl-c must not be typed into the query"
+        );
         assert_eq!(search.query(), "", "ctrl-c is not a query character");
 
         let mut graph = graph_app();
@@ -238,7 +260,10 @@ mod tests {
             handle_key(&mut a, k(KeyCode::Char(c)));
         }
         assert_eq!(a.query(), "middle");
-        assert!(a.matches().is_empty(), "the box and the list must not disagree");
+        assert!(
+            a.matches().is_empty(),
+            "the box and the list must not disagree"
+        );
         // With the stale match gone, Enter runs the new search rather than
         // seeding the symbol found for the old query.
         let reqs = handle_key(&mut a, k(KeyCode::Enter));

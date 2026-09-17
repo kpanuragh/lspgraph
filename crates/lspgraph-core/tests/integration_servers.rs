@@ -61,14 +61,18 @@ fn have(cfg: &ServerConfig) -> bool {
 }
 
 fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures").join(name)
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures")
+        .join(name)
 }
 
 fn source_files(root: &Path, ext: &str) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for e in entries.flatten() {
             let p = e.path();
             if p.is_dir() {
@@ -140,7 +144,10 @@ fn assert_three_level_chain(lang: &str, ext: &str, fixture_dir: &str) {
         .clone();
 
     let mut engine = Engine::new(server);
-    let id = engine.seed(&middle).expect("seed ok").expect("middle resolves");
+    let id = engine
+        .seed(&middle)
+        .expect("seed ok")
+        .expect("middle resolves");
     let exp = engine.expand(&id).expect("expand ok");
 
     assert!(
@@ -157,7 +164,11 @@ fn assert_three_level_chain(lang: &str, ext: &str, fixture_dir: &str) {
     // Memoization: a second expand must not hit the server again.
     let before = engine.expansions_performed();
     let again = engine.expand(&id).expect("second expand ok");
-    assert_eq!(engine.expansions_performed(), before, "second expand must be cached");
+    assert_eq!(
+        engine.expansions_performed(),
+        before,
+        "second expand must be cached"
+    );
     assert_eq!(again, exp);
 
     assert_eq!(engine.graph().get(&id).unwrap().state, NodeState::Expanded);
@@ -261,7 +272,10 @@ fn typescript_unresolvable_symbols_are_recorded_not_dropped() {
         candidate_count,
         "every seeded candidate — resolved or not — must land in the graph exactly once"
     );
-    assert!(unresolved > 0, "fixture's overload/arrow cases should be unresolved");
+    assert!(
+        unresolved > 0,
+        "fixture's overload/arrow cases should be unresolved"
+    );
     assert_eq!(resolved + unresolved, candidate_count);
 
     engine.shutdown().expect("server shuts down");

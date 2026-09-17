@@ -84,8 +84,18 @@ mod tests {
 
     #[test]
     fn accepts_plain_identifiers() {
-        for n in ["types", "handle_request", "_custom", "$ref", "catchall", "uuid"] {
-            assert!(is_named_callable(n, SymbolKind::FUNCTION), "should accept {n}");
+        for n in [
+            "types",
+            "handle_request",
+            "_custom",
+            "$ref",
+            "catchall",
+            "uuid",
+        ] {
+            assert!(
+                is_named_callable(n, SymbolKind::FUNCTION),
+                "should accept {n}"
+            );
         }
     }
 
@@ -100,7 +110,10 @@ mod tests {
             "patternKeys.map() callback",
             "z.custom() callback",
         ] {
-            assert!(!is_named_callable(n, SymbolKind::FUNCTION), "should reject {n}");
+            assert!(
+                !is_named_callable(n, SymbolKind::FUNCTION),
+                "should reject {n}"
+            );
         }
     }
 
@@ -108,8 +121,16 @@ mod tests {
     fn accepts_qualified_method_names() {
         // gopls names a method `counter.bump` in workspace/symbol results and
         // `(*counter).bump` in documentSymbol. Both are real, findable methods.
-        for n in ["counter.bump", "(*counter).bump", "(counter).bump", "pkg.Type.method"] {
-            assert!(is_named_callable(n, SymbolKind::METHOD), "should accept {n}");
+        for n in [
+            "counter.bump",
+            "(*counter).bump",
+            "(counter).bump",
+            "pkg.Type.method",
+        ] {
+            assert!(
+                is_named_callable(n, SymbolKind::METHOD),
+                "should accept {n}"
+            );
         }
     }
 
@@ -117,15 +138,25 @@ mod tests {
     fn a_qualified_name_still_rejects_callback_noise() {
         // The dotted-segment rule must not readmit tsserver's synthesized names,
         // which also contain dots.
-        for n in ["_def.checks.find() callback", "patternKeys.map() callback", "z.custom() callback"] {
-            assert!(!is_named_callable(n, SymbolKind::FUNCTION), "should reject {n}");
+        for n in [
+            "_def.checks.find() callback",
+            "patternKeys.map() callback",
+            "z.custom() callback",
+        ] {
+            assert!(
+                !is_named_callable(n, SymbolKind::FUNCTION),
+                "should reject {n}"
+            );
         }
     }
 
     #[test]
     fn rejects_empty_segments_and_stray_punctuation() {
         for n in [".bump", "counter.", "a..b", "(unclosed.bump", "()"] {
-            assert!(!is_named_callable(n, SymbolKind::METHOD), "should reject {n}");
+            assert!(
+                !is_named_callable(n, SymbolKind::METHOD),
+                "should reject {n}"
+            );
         }
     }
 
@@ -149,16 +180,32 @@ mod tests {
 
     #[test]
     fn accepts_unicode_identifiers() {
-        for n in ["validar_configuración", "Añadir", "日本語関数", "переменная"] {
-            assert!(is_named_callable(n, SymbolKind::FUNCTION), "should accept {n}");
+        for n in [
+            "validar_configuración",
+            "Añadir",
+            "日本語関数",
+            "переменная",
+        ] {
+            assert!(
+                is_named_callable(n, SymbolKind::FUNCTION),
+                "should accept {n}"
+            );
         }
     }
 
     #[allow(deprecated)]
-    fn sym(name: &str, kind: SymbolKind, line: u32, children: Option<Vec<DocumentSymbol>>) -> DocumentSymbol {
+    fn sym(
+        name: &str,
+        kind: SymbolKind,
+        line: u32,
+        children: Option<Vec<DocumentSymbol>>,
+    ) -> DocumentSymbol {
         let r = lsp_types::Range {
             start: Position { line, character: 0 },
-            end: Position { line, character: 10 },
+            end: Position {
+                line,
+                character: 10,
+            },
         };
         DocumentSymbol {
             name: name.to_string(),
@@ -256,7 +303,10 @@ pub fn parse_workspace_symbols(v: &serde_json::Value) -> Vec<SymbolMatch> {
             let uri = Url::parse(loc.get("uri")?.as_str()?).ok()?;
             let start = loc.get("range").and_then(|r| r.get("start"));
             let position = Position {
-                line: start.and_then(|s| s.get("line")).and_then(|l| l.as_u64()).unwrap_or(0) as u32,
+                line: start
+                    .and_then(|s| s.get("line"))
+                    .and_then(|l| l.as_u64())
+                    .unwrap_or(0) as u32,
                 character: start
                     .and_then(|s| s.get("character"))
                     .and_then(|c| c.as_u64())
@@ -312,8 +362,10 @@ mod workspace_symbol_tests {
 
     #[test]
     fn rejects_synthesized_callbacks_and_non_callables() {
-        let names: Vec<String> =
-            parse_workspace_symbols(&sample()).into_iter().map(|m| m.name).collect();
+        let names: Vec<String> = parse_workspace_symbols(&sample())
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
         assert!(!names.iter().any(|n| n.contains("callback")));
         assert!(!names.contains(&"Config".to_string()));
     }

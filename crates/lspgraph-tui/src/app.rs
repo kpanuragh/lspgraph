@@ -390,8 +390,14 @@ mod tests {
         Event::Expanded(
             nid(name),
             ResolvedExpansion {
-                callers: callers.iter().map(|n| node(n, NodeState::Unexpanded)).collect(),
-                callees: callees.iter().map(|n| node(n, NodeState::Unexpanded)).collect(),
+                callers: callers
+                    .iter()
+                    .map(|n| node(n, NodeState::Unexpanded))
+                    .collect(),
+                callees: callees
+                    .iter()
+                    .map(|n| node(n, NodeState::Unexpanded))
+                    .collect(),
             },
         )
     }
@@ -551,7 +557,11 @@ mod tests {
         a.select_next();
         a.select_next();
         a.select_next();
-        assert_eq!(a.selected_index(Pane::Callers), 1, "must not run past the end");
+        assert_eq!(
+            a.selected_index(Pane::Callers),
+            1,
+            "must not run past the end"
+        );
     }
 
     #[test]
@@ -627,7 +637,10 @@ mod tests {
         assert_eq!(a.matches().len(), 1);
         assert!(a.searched());
         a.push_query_char('d');
-        assert!(a.matches().is_empty(), "a stale match must not stay seedable");
+        assert!(
+            a.matches().is_empty(),
+            "a stale match must not stay seedable"
+        );
         assert_eq!(a.selected_match(), 0);
         assert!(!a.searched(), "the new query has not been answered yet");
         a.pop_query_char();
@@ -722,9 +735,6 @@ mod tests {
                 callees: vec![],
             },
         ));
-        assert_eq!(
-            a.callers()[0].detail.as_deref(),
-            Some("fn up() -> i32")
-        );
+        assert_eq!(a.callers()[0].detail.as_deref(), Some("fn up() -> i32"));
     }
 }

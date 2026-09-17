@@ -117,7 +117,11 @@ impl Drop for FakeServerScript {
 /// here); every JSON payload these tests send satisfies both.
 pub fn sh_send_frame(body: &str) -> String {
     debug_assert!(!body.contains('%') && !body.contains('\''));
-    format!("printf 'Content-Length: {}\\r\\n\\r\\n{}'\n", body.len(), body)
+    format!(
+        "printf 'Content-Length: {}\\r\\n\\r\\n{}'\n",
+        body.len(),
+        body
+    )
 }
 
 /// A successful `initialize` result that passes the call-hierarchy gate.

@@ -8,15 +8,13 @@ use ratatui::Frame;
 
 /// Shown when the language server does not advertise `workspaceSymbolProvider`.
 /// An empty list here would be indistinguishable from "nothing matched".
-pub const NO_SEARCH_MSG: &str =
-    "this language server does not support workspace symbol search";
+pub const NO_SEARCH_MSG: &str = "this language server does not support workspace symbol search";
 
 /// Shown when a query returns nothing. Deliberately not phrased as "no
 /// matches in this repository": some servers (vtsls observed) only return
 /// `workspace/symbol` results for files already opened, so an empty list is
 /// never authoritative about the whole repository.
-pub const NO_MATCHES_MSG: &str =
-    "no matches among the files opened so far";
+pub const NO_MATCHES_MSG: &str = "no matches among the files opened so far";
 
 pub fn draw_search(f: &mut Frame, area: Rect, app: &App) {
     let rows = Layout::default()
@@ -32,8 +30,7 @@ pub fn draw_search(f: &mut Frame, area: Rect, app: &App) {
 
     if !app.can_search() {
         f.render_widget(
-            Paragraph::new(NO_SEARCH_MSG)
-                .block(Block::default().borders(Borders::ALL)),
+            Paragraph::new(NO_SEARCH_MSG).block(Block::default().borders(Borders::ALL)),
             rows[1],
         );
         return;
@@ -44,8 +41,7 @@ pub fn draw_search(f: &mut Frame, area: Rect, app: &App) {
     // anything has been asked.
     if app.searched() && app.matches().is_empty() {
         f.render_widget(
-            Paragraph::new(NO_MATCHES_MSG)
-                .block(Block::default().borders(Borders::ALL)),
+            Paragraph::new(NO_MATCHES_MSG).block(Block::default().borders(Borders::ALL)),
             rows[1],
         );
         return;

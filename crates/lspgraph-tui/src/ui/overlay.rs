@@ -15,9 +15,11 @@ pub fn draw_error(f: &mut Frame, area: Rect, msg: &str) {
     };
     f.render_widget(Clear, rect);
     f.render_widget(
-        Paragraph::new(format!("{msg}\n\nesc dismiss · r exit to relaunch · q quit"))
-            .wrap(Wrap { trim: true })
-            .block(Block::default().borders(Borders::ALL).title("error")),
+        Paragraph::new(format!(
+            "{msg}\n\nesc dismiss · r exit to relaunch · q quit"
+        ))
+        .wrap(Wrap { trim: true })
+        .block(Block::default().borders(Borders::ALL).title("error")),
         rect,
     );
 }
@@ -50,7 +52,10 @@ mod tests {
     #[test]
     fn mentions_how_to_dismiss() {
         let out = rendered("boom");
-        assert!(out.to_lowercase().contains("esc"), "must say how to dismiss:\n{out}");
+        assert!(
+            out.to_lowercase().contains("esc"),
+            "must say how to dismiss:\n{out}"
+        );
     }
 
     #[test]

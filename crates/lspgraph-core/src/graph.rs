@@ -163,7 +163,11 @@ impl CallGraph {
     }
 
     pub fn nodes_in_file(&self, uri: &str) -> Vec<NodeId> {
-        self.nodes.keys().filter(|k| k.uri == uri).cloned().collect()
+        self.nodes
+            .keys()
+            .filter(|k| k.uri == uri)
+            .cloned()
+            .collect()
     }
 
     /// Spec 5.4: an edited file invalidates all of its nodes wholesale.
@@ -186,7 +190,12 @@ mod tests {
     use super::*;
 
     fn id(name: &str, line: u32) -> NodeId {
-        NodeId { uri: "file:///a.rs".into(), line, character: 3, name: name.into() }
+        NodeId {
+            uri: "file:///a.rs".into(),
+            line,
+            character: 3,
+            name: name.into(),
+        }
     }
 
     fn node(name: &str, line: u32) -> Node {
@@ -218,7 +227,10 @@ mod tests {
     fn records_edges_in_both_directions() {
         let mut g = CallGraph::new();
         g.upsert(node("f", 1));
-        let exp = Expansion { callers: vec![id("a", 5)], callees: vec![id("b", 9)] };
+        let exp = Expansion {
+            callers: vec![id("a", 5)],
+            callees: vec![id("b", 9)],
+        };
         g.record_expansion(&id("f", 1), &exp);
         assert_eq!(g.callers_of(&id("f", 1)).unwrap(), &[id("a", 5)]);
         assert_eq!(g.callees_of(&id("f", 1)).unwrap(), &[id("b", 9)]);
@@ -237,7 +249,13 @@ mod tests {
         let mut g = CallGraph::new();
         g.upsert(node("f", 1));
         g.upsert(node("g", 2));
-        g.record_expansion(&id("f", 1), &Expansion { callers: vec![], callees: vec![id("g", 2)] });
+        g.record_expansion(
+            &id("f", 1),
+            &Expansion {
+                callers: vec![],
+                callees: vec![id("g", 2)],
+            },
+        );
         g.remove_file("file:///a.rs");
         assert_eq!(g.len(), 0);
         assert!(g.callees_of(&id("f", 1)).is_none());
@@ -319,7 +337,10 @@ mod tests {
     fn call_graph_round_trips_through_json() {
         let mut g = CallGraph::new();
         g.upsert(node("f", 1));
-        let exp = Expansion { callers: vec![id("a", 5)], callees: vec![id("b", 9)] };
+        let exp = Expansion {
+            callers: vec![id("a", 5)],
+            callees: vec![id("b", 9)],
+        };
         g.record_expansion(&id("f", 1), &exp);
 
         let json = serde_json::to_string(&g).expect("serialize");

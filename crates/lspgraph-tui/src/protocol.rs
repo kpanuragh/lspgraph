@@ -20,7 +20,9 @@ pub enum Request {
 pub enum Event {
     /// The server is ready. `can_search` is false when it does not advertise
     /// `workspaceSymbolProvider`.
-    Ready { can_search: bool },
+    Ready {
+        can_search: bool,
+    },
     Matches(Vec<SymbolMatch>),
     /// The seeded symbol, resolved to its full `Node` (signature and all) so
     /// the interface never has to fall back to a bare name.

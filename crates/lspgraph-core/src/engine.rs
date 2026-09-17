@@ -117,7 +117,10 @@ impl Engine {
     /// Expand a node into its callers and callees. Memoized.
     pub fn expand(&mut self, id: &NodeId) -> Result<Expansion> {
         // Memoized: an already-expanded node never hits the server again.
-        if matches!(self.graph.get(id).map(|n| &n.state), Some(NodeState::Expanded)) {
+        if matches!(
+            self.graph.get(id).map(|n| &n.state),
+            Some(NodeState::Expanded)
+        ) {
             return Ok(Expansion {
                 callers: self.graph.callers_of(id).unwrap_or(&[]).to_vec(),
                 callees: self.graph.callees_of(id).unwrap_or(&[]).to_vec(),
@@ -233,10 +236,15 @@ done
         let cand = NamedCallable {
             name: "middle".to_string(),
             uri: Url::parse("file:///tmp/lspgraph-content-modified.rs").unwrap(),
-            position: Position { line: 7, character: 3 },
+            position: Position {
+                line: 7,
+                character: 3,
+            },
         };
 
-        let seeded = engine.seed(&cand).expect("seed must not surface the transient error");
+        let seeded = engine
+            .seed(&cand)
+            .expect("seed must not surface the transient error");
         assert!(seeded.is_none(), "an unresolvable symbol yields no node id");
 
         let id = NodeId {

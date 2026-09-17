@@ -21,7 +21,9 @@ fn source_files(root: &Path, exts: &[String]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for e in entries.flatten() {
             let p = e.path();
             let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
@@ -46,8 +48,8 @@ fn source_files(root: &Path, exts: &[String]) -> Vec<PathBuf> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let lang = args.next().ok_or("usage: lspgraph <language> <root>")?;
-    let root = PathBuf::from(args.next().ok_or("usage: lspgraph <language> <root>")?)
-        .canonicalize()?;
+    let root =
+        PathBuf::from(args.next().ok_or("usage: lspgraph <language> <root>")?).canonicalize()?;
 
     let cfg_path = std::env::var("LSPGRAPH_SERVERS_TOML")
         .map(PathBuf::from)
@@ -69,7 +71,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &ReadinessConfig::from_server_config(server_cfg),
     )?;
 
-    let engine = worker::CoreEngine { engine: Engine::new(server), can_search };
+    let engine = worker::CoreEngine {
+        engine: Engine::new(server),
+        can_search,
+    };
     let (qtx, qrx) = channel::<Request>();
     let (etx, erx) = channel::<Event>();
     let handle = worker::spawn_worker(Box::new(engine), qrx, etx);

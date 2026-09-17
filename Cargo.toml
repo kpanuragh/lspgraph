@@ -4,5 +4,5 @@ members = ["crates/lspgraph-core", "crates/lspgraph-tui"]
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.88"
 license = "MIT OR Apache-2.0"

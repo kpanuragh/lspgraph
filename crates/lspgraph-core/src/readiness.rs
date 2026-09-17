@@ -23,7 +23,11 @@ pub struct ReadinessConfig {
 impl Default for ReadinessConfig {
     fn default() -> Self {
         // Spec 5.2.
-        Self { max_files: 40, per_file: 3, timeout: Duration::from_secs(300) }
+        Self {
+            max_files: 40,
+            per_file: 3,
+            timeout: Duration::from_secs(300),
+        }
     }
 }
 
@@ -68,7 +72,9 @@ pub fn even_stride<T>(items: &[T], max: usize) -> Vec<&T> {
 
 /// Time left before `deadline`, or `None` if it has already passed.
 pub fn remaining_budget(deadline: Instant, now: Instant) -> Option<Duration> {
-    deadline.checked_duration_since(now).filter(|d| !d.is_zero())
+    deadline
+        .checked_duration_since(now)
+        .filter(|d| !d.is_zero())
 }
 
 pub fn wait_until_ready(
@@ -105,7 +111,10 @@ pub fn wait_until_ready(
     }
 
     if candidates.is_empty() {
-        return Err(Error::NoCandidates { files_attempted, files_failed });
+        return Err(Error::NoCandidates {
+            files_attempted,
+            files_failed,
+        });
     }
 
     while remaining_budget(deadline, Instant::now()).is_some() {
@@ -132,7 +141,10 @@ pub fn wait_until_ready(
         std::thread::sleep(Duration::from_secs(1));
     }
 
-    Err(Error::NotReady { timeout: cfg.timeout, tried: candidates.len() })
+    Err(Error::NotReady {
+        timeout: cfg.timeout,
+        tried: candidates.len(),
+    })
 }
 
 #[cfg(test)]
@@ -228,7 +240,10 @@ mod tests {
 
     #[test]
     fn zero_candidates_reports_no_candidates_not_a_zero_timeout() {
-        let err = Error::NoCandidates { files_attempted: 5, files_failed: 3 };
+        let err = Error::NoCandidates {
+            files_attempted: 5,
+            files_failed: 3,
+        };
         let msg = err.to_string();
         assert!(
             msg.contains('5') && msg.contains('3'),

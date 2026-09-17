@@ -44,7 +44,11 @@ fn short_location(id: &NodeId) -> String {
 pub fn draw_graph(f: &mut Frame, area: Rect, app: &App) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(3),
+            Constraint::Length(1),
+        ])
         .split(area);
 
     f.render_widget(
@@ -88,12 +92,21 @@ pub fn draw_graph(f: &mut Frame, area: Rect, app: &App) {
                 })
                 .collect()
         };
-        List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(title.to_string()).border_style(border))
+        List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title.to_string())
+                .border_style(border),
+        )
     };
 
     f.render_widget(
-        side("callers", app.callers(), app.pane() == Pane::Callers, app.selected_index(Pane::Callers)),
+        side(
+            "callers",
+            app.callers(),
+            app.pane() == Pane::Callers,
+            app.selected_index(Pane::Callers),
+        ),
         cols[0],
     );
 
@@ -106,13 +119,17 @@ pub fn draw_graph(f: &mut Frame, area: Rect, app: &App) {
         None => String::new(),
     };
     f.render_widget(
-        Paragraph::new(focus_body)
-            .block(Block::default().borders(Borders::ALL).title(focus_title)),
+        Paragraph::new(focus_body).block(Block::default().borders(Borders::ALL).title(focus_title)),
         cols[1],
     );
 
     f.render_widget(
-        side("callees", app.callees(), app.pane() == Pane::Callees, app.selected_index(Pane::Callees)),
+        side(
+            "callees",
+            app.callees(),
+            app.pane() == Pane::Callees,
+            app.selected_index(Pane::Callees),
+        ),
         cols[2],
     );
 
@@ -133,11 +150,21 @@ mod tests {
     use ratatui::Terminal;
 
     fn nid(name: &str) -> NodeId {
-        NodeId { uri: "file:///a.rs".into(), line: 1, character: 3, name: name.into() }
+        NodeId {
+            uri: "file:///a.rs".into(),
+            line: 1,
+            character: 3,
+            name: name.into(),
+        }
     }
 
     fn node(name: &str) -> Node {
-        Node { id: nid(name), kind_name: "Function".into(), detail: None, state: NodeState::Unexpanded }
+        Node {
+            id: nid(name),
+            kind_name: "Function".into(),
+            detail: None,
+            state: NodeState::Unexpanded,
+        }
     }
 
     fn rendered(app: &App) -> String {
@@ -160,7 +187,10 @@ mod tests {
         a.on_event(Event::Seeded(Some(node("send_request"))));
         a.on_event(Event::Expanded(
             nid("send_request"),
-            ResolvedExpansion { callers: vec![node("handle_request")], callees: vec![node("validate")] },
+            ResolvedExpansion {
+                callers: vec![node("handle_request")],
+                callees: vec![node("validate")],
+            },
         ));
         a
     }
@@ -168,7 +198,10 @@ mod tests {
     #[test]
     fn shows_both_directions_and_the_focus() {
         let out = rendered(&app_with_expansion());
-        assert!(out.contains("handle_request"), "callers pane missing:\n{out}");
+        assert!(
+            out.contains("handle_request"),
+            "callers pane missing:\n{out}"
+        );
         assert!(out.contains("send_request"), "focus missing:\n{out}");
         assert!(out.contains("validate"), "callees pane missing:\n{out}");
     }
@@ -196,10 +229,16 @@ mod tests {
         a.on_event(Event::Seeded(Some(node("f"))));
         a.on_event(Event::Expanded(
             nid("f"),
-            ResolvedExpansion { callers: vec![], callees: vec![] },
+            ResolvedExpansion {
+                callers: vec![],
+                callees: vec![],
+            },
         ));
         let out = rendered(&a);
-        assert!(!out.contains(SPINNER), "resolved-and-empty must not look pending:\n{out}");
+        assert!(
+            !out.contains(SPINNER),
+            "resolved-and-empty must not look pending:\n{out}"
+        );
     }
 
     #[test]
@@ -222,8 +261,14 @@ mod tests {
         };
         a.on_event(Event::Seeded(Some(n)));
         let out = rendered(&a);
-        assert!(out.contains("lib.rs:5"), "must show a short location:\n{out}");
-        assert!(!out.contains("file://"), "must not leak the raw uri:\n{out}");
+        assert!(
+            out.contains("lib.rs:5"),
+            "must show a short location:\n{out}"
+        );
+        assert!(
+            !out.contains("file://"),
+            "must not leak the raw uri:\n{out}"
+        );
     }
 
     #[test]
@@ -248,7 +293,10 @@ mod tests {
         over.state = NodeState::Unresolved(UnresolvedReason::NoCallHierarchyItem);
         a.on_event(Event::Expanded(
             nid("f"),
-            ResolvedExpansion { callers: vec![over], callees: vec![] },
+            ResolvedExpansion {
+                callers: vec![over],
+                callees: vec![],
+            },
         ));
         let out = rendered(&a);
         assert!(
@@ -269,7 +317,10 @@ mod tests {
         empty.on_event(Event::Seeded(Some(node("middle"))));
         empty.on_event(Event::Expanded(
             nid("middle"),
-            ResolvedExpansion { callers: vec![], callees: vec![] },
+            ResolvedExpansion {
+                callers: vec![],
+                callees: vec![],
+            },
         ));
         let empty_out = rendered(&empty);
 
@@ -284,10 +335,16 @@ mod tests {
             failed_out.contains(FAILED_LINE),
             "a failed expansion must say so:\n{failed_out}"
         );
-        assert!(!failed_out.contains(SPINNER), "a failure is not still loading");
+        assert!(
+            !failed_out.contains(SPINNER),
+            "a failure is not still loading"
+        );
         assert!(!empty_out.contains(FAILED_LINE));
         assert!(!pending_out.contains(FAILED_LINE));
-        assert_ne!(failed_out, empty_out, "failed must not look like no-callers");
+        assert_ne!(
+            failed_out, empty_out,
+            "failed must not look like no-callers"
+        );
         assert_ne!(failed_out, pending_out, "failed must not look like loading");
     }
 
