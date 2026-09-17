@@ -41,8 +41,14 @@ jobs:
           npm install -g @vtsls/language-server
           pip install basedpyright
           go install golang.org/x/tools/gopls@latest
-          sudo apt-get update
-          sudo apt-get install -y clangd
+          # Ubuntu noble's packaged clangd is 18.1.3, which answers
+          # callHierarchy/outgoingCalls with "method not found" (it never
+          # implemented that half of call hierarchy). Install a pinned
+          # upstream release instead, which does.
+          curl -fsSL -o /tmp/clangd.zip \
+            https://github.com/clangd/clangd/releases/download/23.1.0/clangd-linux-23.1.0.zip
+          unzip -q /tmp/clangd.zip -d "$HOME"
+          echo "$HOME/clangd_23.1.0/bin" >> "$GITHUB_PATH"
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: Record server versions
