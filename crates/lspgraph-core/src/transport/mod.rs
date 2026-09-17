@@ -189,37 +189,85 @@ mod tests {
     use super::*;
     use std::io::{Cursor, Read};
 
+    /// Opens once the client has written something. The canned reader waits
+    /// on this so it cannot answer a request that has not been made yet —
+    /// which is the one thing a real server also cannot do. Deterministic
+    /// alternative to sleeping a fixed delay: the reader thread starts as
+    /// soon as `Connection::new` returns, and without this gate it can race
+    /// `Connection::request` and remove-and-send a response before
+    /// `request` has registered the id it is replying to, silently
+    /// dropping the response and leaving the caller to time out instead of
+    /// seeing the canned answer.
+    #[derive(Clone, Default)]
+    struct Handshake(std::sync::Arc<(Mutex<bool>, std::sync::Condvar)>);
+
+    impl Handshake {
+        fn opened(&self) {
+            let (lock, cv) = &*self.0;
+            *lock.lock().unwrap() = true;
+            cv.notify_all();
+        }
+        fn wait(&self) {
+            let (lock, cv) = &*self.0;
+            let mut open = lock.lock().unwrap();
+            while !*open {
+                open = cv.wait(open).unwrap();
+            }
+        }
+    }
+
     /// A fake server: reads framed requests, replies per a canned table.
     struct Duplex {
         to_client: Cursor<Vec<u8>>,
+        handshake: Handshake,
         delivered: bool,
     }
 
     impl Read for Duplex {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            // The reader thread starts as soon as `Connection::new` returns,
-            // and canned bytes are available immediately. Without this delay
-            // it can race `Connection::request` and remove-and-send a
-            // response before `request` has registered the id it is
-            // replying to, silently dropping the response and leaving the
-            // caller to time out instead of seeing the canned answer.
             if !self.delivered {
                 self.delivered = true;
-                std::thread::sleep(Duration::from_millis(50));
+                self.handshake.wait();
             }
             self.to_client.read(buf)
         }
     }
 
-    fn canned(messages: &[Value]) -> Duplex {
+    /// A writer that records everything the client sends, and opens
+    /// `handshake` on write so a paired `Duplex` knows a request has
+    /// actually been made before it delivers the response to it.
+    #[derive(Default)]
+    struct Tee {
+        sent: Arc<Mutex<Vec<u8>>>,
+        handshake: Handshake,
+    }
+
+    impl Write for Tee {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.sent.lock().unwrap().extend_from_slice(b);
+            self.handshake.opened();
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Builds a fake server plus the writer that gates it: the returned
+    /// `Duplex` will not deliver its first byte until the returned `Tee` is
+    /// written to.
+    fn canned(messages: &[Value]) -> (Duplex, Tee) {
         let mut bytes = Vec::new();
         for m in messages {
             bytes.extend_from_slice(&codec::encode(serde_json::to_string(m).unwrap().as_bytes()));
         }
-        Duplex {
+        let writer = Tee::default();
+        let server = Duplex {
             to_client: Cursor::new(bytes),
+            handshake: writer.handshake.clone(),
             delivered: false,
-        }
+        };
+        (server, writer)
     }
 
     /// A reader whose `read` blocks on a channel, so a test controls exactly
@@ -242,8 +290,8 @@ mod tests {
 
     #[test]
     fn resolves_a_response_by_id() {
-        let server = canned(&[json!({"jsonrpc":"2.0","id":1,"result":{"ok":true}})]);
-        let conn = Connection::new(server, Vec::new());
+        let (server, writer) = canned(&[json!({"jsonrpc":"2.0","id":1,"result":{"ok":true}})]);
+        let conn = Connection::new(server, writer);
         let got = conn
             .request("x", json!({}), Duration::from_secs(2))
             .unwrap();
@@ -252,10 +300,10 @@ mod tests {
 
     #[test]
     fn surfaces_an_error_response() {
-        let server = canned(&[
+        let (server, writer) = canned(&[
             json!({"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"no such method"}}),
         ]);
-        let conn = Connection::new(server, Vec::new());
+        let conn = Connection::new(server, writer);
         let err = conn
             .request("x", json!({}), Duration::from_secs(2))
             .unwrap_err();
@@ -264,10 +312,10 @@ mod tests {
 
     #[test]
     fn content_modified_error_code_is_distinguished_from_protocol_errors() {
-        let server = canned(&[
+        let (server, writer) = canned(&[
             json!({"jsonrpc":"2.0","id":1,"error":{"code":-32801,"message":"content modified"}}),
         ]);
-        let conn = Connection::new(server, Vec::new());
+        let conn = Connection::new(server, writer);
         let err = conn
             .request("x", json!({}), Duration::from_secs(2))
             .unwrap_err();
@@ -276,10 +324,10 @@ mod tests {
 
     #[test]
     fn other_error_codes_still_surface_as_protocol_errors() {
-        let server = canned(&[
+        let (server, writer) = canned(&[
             json!({"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"no such method"}}),
         ]);
-        let conn = Connection::new(server, Vec::new());
+        let conn = Connection::new(server, writer);
         let err = conn
             .request("x", json!({}), Duration::from_secs(2))
             .unwrap_err();
@@ -288,10 +336,14 @@ mod tests {
 
     #[test]
     fn routes_notifications_to_the_channel() {
-        let server = canned(&[
+        let (server, writer) = canned(&[
             json!({"jsonrpc":"2.0","method":"window/logMessage","params":{"message":"hi"}}),
         ]);
-        let conn = Connection::new(server, Vec::new());
+        // No client request is made in this test, so nothing will write to
+        // `writer` and open the handshake on its own; a notification is not
+        // a reply to anything, so open it directly.
+        writer.handshake.opened();
+        let conn = Connection::new(server, writer);
         let n = conn
             .notifications()
             .recv_timeout(Duration::from_secs(2))
@@ -336,28 +388,15 @@ mod tests {
         );
     }
 
-    /// A writer that records everything the client sends.
-    struct Tee(Arc<Mutex<Vec<u8>>>);
-
-    impl Write for Tee {
-        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(b);
-            Ok(b.len())
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
     #[test]
     fn answers_server_initiated_requests() {
         // A server->client request must be answered or the server can block.
-        let server = canned(&[
+        let (server, writer) = canned(&[
             json!({"jsonrpc":"2.0","id":99,"method":"workspace/configuration","params":{}}),
             json!({"jsonrpc":"2.0","id":1,"result":"after"}),
         ]);
-        let written = Arc::new(Mutex::new(Vec::<u8>::new()));
-        let conn = Connection::new(server, Tee(written.clone()));
+        let written = writer.sent.clone();
+        let conn = Connection::new(server, writer);
         let got = conn
             .request("x", json!({}), Duration::from_secs(2))
             .unwrap();
@@ -375,12 +414,12 @@ mod tests {
         // JSON-RPC permits a string id. Matching ids with `as_i64` alone sent
         // such a request down the notification path, so it was never
         // answered and a server awaiting the reply could block forever.
-        let server = canned(&[
+        let (server, writer) = canned(&[
             json!({"jsonrpc":"2.0","id":"cfg-7","method":"workspace/configuration","params":{}}),
             json!({"jsonrpc":"2.0","id":1,"result":"after"}),
         ]);
-        let written = Arc::new(Mutex::new(Vec::<u8>::new()));
-        let conn = Connection::new(server, Tee(written.clone()));
+        let written = writer.sent.clone();
+        let conn = Connection::new(server, writer);
         let got = conn
             .request("x", json!({}), Duration::from_secs(2))
             .unwrap();
@@ -403,11 +442,14 @@ mod tests {
     #[test]
     fn a_null_id_is_treated_as_a_notification() {
         // `"id": null` is not an id; answering it would be wrong.
-        let server = canned(&[
+        let (server, writer) = canned(&[
             json!({"jsonrpc":"2.0","id":Value::Null,"method":"window/logMessage","params":{}}),
         ]);
-        let written = Arc::new(Mutex::new(Vec::<u8>::new()));
-        let conn = Connection::new(server, Tee(written.clone()));
+        // No client request is made in this test either; open the handshake
+        // directly for the same reason as `routes_notifications_to_the_channel`.
+        writer.handshake.opened();
+        let written = writer.sent.clone();
+        let conn = Connection::new(server, writer);
         let n = conn
             .notifications()
             .recv_timeout(Duration::from_secs(2))
