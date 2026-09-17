@@ -29,7 +29,7 @@ Adding a language means adding a table to `servers.toml`. No code.
 | vtsls | validated by integration tests against the real server |
 | basedpyright | validated by integration tests against the real server |
 | gopls | validated by integration tests against the real server |
-| clangd | validated by integration tests against the real server |
+| clangd | validated by integration tests against the real server, at 23.1.0 — see note below |
 | anything else implementing `callHierarchyProvider` | expected to work, untested |
 
 Two of these need something on the machine beyond the server itself. `gopls`
@@ -38,12 +38,24 @@ nothing — which surfaces as `NoCandidates`, not as a hang. `clangd` needs a
 `compile_commands.json` describing the project, the same way rust-analyzer
 needs a loadable Cargo manifest.
 
+`clangd` also has a version floor the table row above doesn't fully convey:
+validation is against upstream 23.1.0. Ubuntu's packaged clangd 18.1.3 does
+not implement `callHierarchy/outgoingCalls` — it answers "method not found"
+rather than erroring, so callees go silently missing with no warning that
+anything is wrong. If clangd is returning callers but never callees, this is
+why; check its version.
+
 Servers listed as untested are untested. They are not claimed to be supported.
 
 The integration tests (`cargo test -p lspgraph-core --test integration_servers`)
-drive each of the three servers end to end, and skip the ones that are not
-installed on the machine running them. There is no CI pipeline yet, so the
-validation above is whatever was last run by hand.
+drive each of the five servers above end to end, and skip the ones that are
+not installed on the machine running them. Pull requests run unit tests on
+Linux, macOS and Windows, plus lint and an MSRV check; the five-server
+integration suite runs nightly rather than on every pull request, because two
+intermittent failures were observed during development and never reproduced.
+A likely cause — a race in the transport test harness — was found and
+replaced with a deterministic handshake, but that suite should not be
+described as stable until it has run clean for a while.
 
 ## Configuration
 
@@ -70,6 +82,37 @@ measured — setting this will not make anything faster.
 
 To point at servers installed outside `PATH` without editing the committed
 file, set `LSPGRAPH_SERVERS_TOML` to an override file.
+
+## Install
+
+There is no stable release yet. A pre-release, `v0.1.0-rc1`, is available on
+the [releases page][releases] — download a binary from it, or build from
+source with `cargo build --release`.
+
+```sh
+# Linux x86_64, statically linked — runs on any distribution
+curl -sL https://github.com/kpanuragh/lspgraph/releases/download/v0.1.0-rc1/lspgraph-v0.1.0-rc1-x86_64-unknown-linux-musl.tar.gz | tar xz
+./lspgraph-v0.1.0-rc1-x86_64-unknown-linux-musl/lspgraph rust /path/to/project
+```
+
+Binaries are published for Linux (x86_64 and aarch64, static), macOS (Intel
+and Apple Silicon) and Windows (x86_64):
+
+- `lspgraph-v0.1.0-rc1-x86_64-unknown-linux-musl.tar.gz`
+- `lspgraph-v0.1.0-rc1-aarch64-unknown-linux-musl.tar.gz`
+- `lspgraph-v0.1.0-rc1-x86_64-apple-darwin.tar.gz`
+- `lspgraph-v0.1.0-rc1-aarch64-apple-darwin.tar.gz`
+- `lspgraph-v0.1.0-rc1-x86_64-pc-windows-msvc.zip`
+
+Every release carries a `SHA256SUMS` file alongside the binaries.
+
+[releases]: https://github.com/kpanuragh/lspgraph/releases/tag/v0.1.0-rc1
+
+Windows binaries are built and unit-tested in CI, including every terminal
+rendering test. The interactive path — raw mode and the alternate screen on a
+real Windows console — is not verified by anything, and four process-lifecycle
+tests are Unix-only and do not run there. Treat Windows as untested in
+practice until someone confirms it.
 
 ## Try it
 
