@@ -195,6 +195,7 @@ fn python_call_chain() {
 
 #[test]
 fn go_call_chain() {
+    assert!(false, "deliberate failure to prove the artifact upload works");
     assert_three_level_chain("go", "go", "go-fixture");
 }
 
