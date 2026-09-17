@@ -9,7 +9,11 @@ every language with a language server is reachable.
 
 ## Status
 
-Early. `lspgraph-core` is the engine; the TUI is not written yet.
+`lspgraph-core` is the engine, and `lspgraph-tui` is a working terminal
+interface built on it: `cargo run -p lspgraph-tui -- <language> <root>`
+starts the language server, waits for it to report itself genuinely ready,
+then lets you search for a symbol and walk its call graph. See "Try it"
+below.
 
 Caching is **not yet wired up**. `lspgraph_core::cache` can serialize and
 restore a graph and is tested, but nothing calls it: every run starts cold.
@@ -60,6 +64,24 @@ To point at servers installed outside `PATH` without editing the committed
 file, set `LSPGRAPH_SERVERS_TOML` to an override file.
 
 ## Try it
+
+```sh
+cargo run -p lspgraph-tui -- rust /path/to/a/cargo/project
+```
+
+`←/→` move between panes, `↑/↓` select, `Enter` re-centres on the selected
+symbol, `u` goes back, `/` searches, `q` quits.
+
+Symbols the language server cannot resolve are shown with a `⊘` marker and an
+explanation, rather than hidden — between 2.5% (Rust) and 30% (TypeScript) of
+named callables legitimately have no call hierarchy.
+
+If something goes wrong, an overlay shows the message: `esc` dismisses it,
+`r` ends the session so you can relaunch (it does not restart the server in
+place), and `q` quits.
+
+The engine alone, with no terminal interface, is also reachable through the
+`crawl` example:
 
 ```sh
 cargo run --example crawl -- rust /path/to/a/cargo/project
