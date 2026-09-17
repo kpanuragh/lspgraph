@@ -52,13 +52,18 @@ fn have(cfg: &ServerConfig) -> bool {
             })
             .unwrap_or(false)
     } else {
-        std::process::Command::new("sh")
-            .arg("-c")
-            .arg(format!("command -v {prog}"))
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        on_path(&prog)
     }
+}
+
+/// Is a bare program name resolvable on `PATH`?
+fn on_path(prog: &str) -> bool {
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("command -v {prog}"))
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 fn fixture(name: &str) -> PathBuf {
@@ -196,6 +201,15 @@ fn python_call_chain() {
 
 #[test]
 fn go_call_chain() {
+    // gopls shells out to the Go toolchain. Without it the server starts
+    // normally and then fails to analyse every file, which arrives here as
+    // `NoCandidates` -- indistinguishable from a real breakage, on a machine
+    // whose only problem is that Go is not installed. `have` cannot catch this:
+    // the gopls binary is present and runnable. Skip, and say why.
+    if !on_path("go") {
+        eprintln!("skipping: gopls needs the Go toolchain, and `go` is not on PATH");
+        return;
+    }
     assert_three_level_chain("go", "go", "go-fixture");
 }
 
