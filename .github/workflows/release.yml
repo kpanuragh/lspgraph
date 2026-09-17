@@ -106,7 +106,15 @@ jobs:
           cd dist
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
+      - name: A hyphenated tag is a pre-release by semver
+        id: relkind
+        run: |
+          case "$GITHUB_REF_NAME" in
+            *-*) echo "prerelease=true"  >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+          prerelease: ${{ steps.relkind.outputs.prerelease }}
