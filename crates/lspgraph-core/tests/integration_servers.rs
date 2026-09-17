@@ -1,8 +1,9 @@
 //! Integration tests against real language servers.
 //!
 //! Each test skips when its server is absent, so `cargo test` stays green on
-//! a machine with no language servers installed. There is no CI pipeline yet,
-//! so these are what "validated" means for the three supported servers.
+//! a machine with no language servers installed. These are what "validated"
+//! means for the five supported servers; `.github/workflows/integration.yml`
+//! runs them nightly against all five.
 //!
 //! `servers.toml` at the repo root keeps bare command names (`rust-analyzer`,
 //! `vtsls --stdio`, `basedpyright-langserver --stdio`), which is correct for

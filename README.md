@@ -53,9 +53,14 @@ not installed on the machine running them. Pull requests run unit tests on
 Linux, macOS and Windows, plus lint and an MSRV check; the five-server
 integration suite runs nightly rather than on every pull request, because two
 intermittent failures were observed during development and never reproduced.
-A likely cause — a race in the transport test harness — was found and
-replaced with a deterministic handshake, but that suite should not be
-described as stable until it has run clean for a while.
+
+Those two failures were in different suites, and only one of them is now
+explained. The unit-suite failure had a real cause: a race in the transport
+test harness, since replaced with a deterministic handshake. That harness is
+`#[cfg(test)]` code inside the library, so it is not linked into the
+integration test binary at all and cannot account for the integration-suite
+failure — which remains unexplained. The nightly run keeps its complete log as
+an artifact, so that if it happens again there is something to read.
 
 ## Configuration
 
@@ -110,8 +115,9 @@ Every release carries a `SHA256SUMS` file alongside the binaries.
 
 Windows binaries are built and unit-tested in CI, including every terminal
 rendering test. The interactive path — raw mode and the alternate screen on a
-real Windows console — is not verified by anything, and four process-lifecycle
-tests are Unix-only and do not run there. Treat Windows as untested in
+real Windows console — is not verified by anything, and eight unit tests are
+Unix-only and do not run there (six process-lifecycle guards, and two others
+that shell out to a Unix command or build a Unix path). Treat Windows as untested in
 practice until someone confirms it.
 
 ## Try it

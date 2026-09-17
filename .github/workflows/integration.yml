@@ -14,6 +14,12 @@ env:
 jobs:
   integration:
     runs-on: ubuntu-latest
+    # A hung language server would otherwise burn the 6-hour default, and a
+    # job cancelled by timeout does not run `if: failure()` — so the evidence
+    # this workflow exists to capture would be lost exactly when it matters.
+    # Worst legitimate case is ~25min (5 servers x the 300s readiness budget)
+    # plus installs.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -56,39 +62,14 @@ jobs:
           clangd --version
           go version
 
-      - name: Write the CI server configuration
-        run: |
-          cat > servers.ci.toml <<'TOML'
-          [rust]
-          cmd = "rust-analyzer"
-          extensions = ["rs"]
-
-          [typescript]
-          cmd = "vtsls --stdio"
-          extensions = ["ts", "tsx"]
-
-          [python]
-          cmd = "basedpyright-langserver --stdio"
-          extensions = ["py"]
-
-          [go]
-          cmd = "gopls"
-          extensions = ["go"]
-
-          [c]
-          cmd = "clangd"
-          extensions = ["c", "h"]
-          TOML
-
       # --test-threads=1 because five servers starting at once contend for CPU
       # and make timings unreliable. --nocapture and tee because the whole
       # point of this workflow is that a failure leaves evidence behind.
+      # No LSPGRAPH_SERVERS_TOML here on purpose: the suite falls back to the
+      # committed servers.toml, whose bare command names are already correct
+      # for a runner where every server is on PATH. Writing a CI-only copy
+      # would mean a sixth language could be added to one and not the other.
       - name: Integration suite
-        env:
-          # cargo runs test binaries with cwd set to the crate directory, not
-          # the workspace root where this file is written, so the path must
-          # be absolute.
-          LSPGRAPH_SERVERS_TOML: ${{ github.workspace }}/servers.ci.toml
         run: |
           set -o pipefail
           cargo test -p lspgraph-core --test integration_servers -- \
@@ -100,4 +81,6 @@ jobs:
         with:
           name: integration-log
           path: integration.log
-          retention-days: 30
+          # The default run-log retention is 90 days; a shorter window here
+          # would throw away the detail first.
+          retention-days: 90

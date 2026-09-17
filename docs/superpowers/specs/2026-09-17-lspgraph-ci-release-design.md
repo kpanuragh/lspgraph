@@ -192,8 +192,14 @@ Two things remain unverified there:
 - **The interactive terminal path.** crossterm's raw mode and alternate-screen
   handling on a real Windows console is exercised by nothing. The `TestBackend`
   tests render into a buffer and never touch a terminal.
-- **Four `#[cfg(unix)]` tests do not run**, including the process-leak guards
+- **Eight `#[cfg(unix)]` tests do not run**, including the process-leak guards
   that prove a language server does not survive the interface exiting.
+
+  This spec said "four" when it was written, by counting `#[cfg(unix)]`
+  attributes rather than the tests behind them — one of the four gates a module
+  of six. CI settles it: the unit suite reports 78 passed on Ubuntu and 70 on
+  Windows. The implementation added one further gate, so the real figure is
+  eight, and the README states that number.
 
 So the README states that Windows binaries are built and unit-tested but that
 the interactive path is unverified, until someone confirms it on real hardware.

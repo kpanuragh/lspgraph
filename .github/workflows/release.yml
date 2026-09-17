@@ -7,9 +7,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-permissions:
-  contents: write
-
 jobs:
   # Publishing a binary labelled with a version it was not built from is worse
   # than publishing nothing, so this runs before anything is built.
@@ -22,12 +19,20 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME#v}"
           core="${tag%%-*}"          # v0.1.0-rc1 -> 0.1.0 ; v0.1.0 -> 0.1.0
-          crate=$(grep -m1 '^version' crates/lspgraph-tui/Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
-          echo "tag=$tag core=$core crate=$crate"
-          if [ "$core" != "$crate" ]; then
-            echo "::error::tag $tag does not match crate version $crate"
-            exit 1
-          fi
+          # Both manifests carry a literal version; neither inherits from the
+          # workspace. Checking only one lets the two drift apart and still ship.
+          for manifest in crates/lspgraph-core/Cargo.toml crates/lspgraph-tui/Cargo.toml; do
+            crate=$(grep -m1 '^version' "$manifest" | sed -E 's/.*"(.*)".*/\1/')
+            echo "tag=$tag core=$core $manifest=$crate"
+            if [ -z "$crate" ]; then
+              echo "::error::no literal version found in $manifest"
+              exit 1
+            fi
+            if [ "$core" != "$crate" ]; then
+              echo "::error::tag $tag does not match $manifest version $crate"
+              exit 1
+            fi
+          done
 
   build:
     needs: guard
@@ -94,6 +99,8 @@ jobs:
           if-no-files-found: error
 
   publish:
+    permissions:
+      contents: write
     needs: build
     runs-on: ubuntu-latest
     steps:
