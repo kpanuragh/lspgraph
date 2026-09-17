@@ -53,10 +53,14 @@ tsserver (where that noise was 74% of enumerated entries).
 
 **Degradation is a requirement, not a nicety.** `workspace/symbol` is optional
 in LSP and some servers do not implement it. If `initialize` does not advertise
-`workspaceSymbolProvider`, the interface says so in the search pane and falls
-back to enumerating the currently-open file. It must never render an empty
-result list in that case, because "this server cannot search" and "your query
-matched nothing" would then look identical — the same class of
+`workspaceSymbolProvider`, the search pane says so in as many words and the
+user can quit cleanly; there is no fallback. There is nothing to fall back
+*to*: this interface has no "currently-open file" — no file browser, no editor
+integration (§9 lists both as non-goals), so enumerating one would mean
+inventing the file picker that same section excludes. v0.1 therefore requires
+a server that implements `workspace/symbol`. What the pane must never do is
+render an empty result list, because "this server cannot search" and "your
+query matched nothing" would then look identical — the same class of
 indistinguishable-failure problem the engine spec's §5.2 exists to prevent.
 
 There is a second, narrower version of the same problem, measured against a
