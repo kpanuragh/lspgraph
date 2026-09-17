@@ -84,7 +84,10 @@ jobs:
       # point of this workflow is that a failure leaves evidence behind.
       - name: Integration suite
         env:
-          LSPGRAPH_SERVERS_TOML: servers.ci.toml
+          # cargo runs test binaries with cwd set to the crate directory, not
+          # the workspace root where this file is written, so the path must
+          # be absolute.
+          LSPGRAPH_SERVERS_TOML: ${{ github.workspace }}/servers.ci.toml
         run: |
           set -o pipefail
           cargo test -p lspgraph-core --test integration_servers -- \
