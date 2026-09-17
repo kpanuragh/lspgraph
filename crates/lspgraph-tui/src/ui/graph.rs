@@ -1,7 +1,7 @@
 //! The three-pane call graph view.
 
 use crate::app::{App, Pane};
-use lspgraph_core::graph::{Node, NodeState};
+use lspgraph_core::graph::{Node, NodeId, NodeState};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
@@ -18,6 +18,20 @@ pub fn label(n: &Node) -> String {
         NodeState::Unresolved(_) => format!("{UNRESOLVED_MARK} {}", n.id.name),
         _ => n.id.name.clone(),
     }
+}
+
+/// Renders a `NodeId`'s location the way the spec's mockup shows it —
+/// `transport.rs:88`, not the raw `file://` uri the centre pane would
+/// otherwise clip mid-path (spec §5). Total: a uri with no `/` still yields
+/// something readable rather than an empty string.
+fn short_location(id: &NodeId) -> String {
+    let file = id
+        .uri
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(id.uri.as_str());
+    format!("{file}:{}", id.line + 1)
 }
 
 pub fn draw_graph(f: &mut Frame, area: Rect, app: &App) {
@@ -77,7 +91,7 @@ pub fn draw_graph(f: &mut Frame, area: Rect, app: &App) {
     let focus_body = match app.focus() {
         Some(n) => {
             let detail = n.detail.clone().unwrap_or_else(|| n.kind_name.clone());
-            format!("{}\n{}:{}", detail, n.id.uri, n.id.line + 1)
+            format!("{}\n{}", detail, short_location(&n.id))
         }
         None => String::new(),
     };
@@ -103,13 +117,17 @@ pub fn draw_graph(f: &mut Frame, area: Rect, app: &App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::Event;
-    use lspgraph_core::graph::{Expansion, NodeId, UnresolvedReason};
+    use crate::protocol::{Event, ResolvedExpansion};
+    use lspgraph_core::graph::{NodeId, UnresolvedReason};
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
     fn nid(name: &str) -> NodeId {
         NodeId { uri: "file:///a.rs".into(), line: 1, character: 3, name: name.into() }
+    }
+
+    fn node(name: &str) -> Node {
+        Node { id: nid(name), kind_name: "Function".into(), detail: None, state: NodeState::Unexpanded }
     }
 
     fn rendered(app: &App) -> String {
@@ -129,10 +147,10 @@ mod tests {
     fn app_with_expansion() -> App {
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: true });
-        a.on_event(Event::Seeded(Some(nid("send_request"))));
+        a.on_event(Event::Seeded(Some(node("send_request"))));
         a.on_event(Event::Expanded(
             nid("send_request"),
-            Expansion { callers: vec![nid("handle_request")], callees: vec![nid("validate")] },
+            ResolvedExpansion { callers: vec![node("handle_request")], callees: vec![node("validate")] },
         ));
         a
     }
@@ -155,7 +173,7 @@ mod tests {
     fn a_pending_pane_shows_a_spinner_not_an_empty_list() {
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: true });
-        a.on_event(Event::Seeded(Some(nid("f")))); // expansion in flight
+        a.on_event(Event::Seeded(Some(node("f")))); // expansion in flight
         assert!(a.is_pending());
         let out = rendered(&a);
         assert!(out.contains(SPINNER), "pending must be visible:\n{out}");
@@ -165,10 +183,37 @@ mod tests {
     fn an_empty_expansion_renders_no_spinner() {
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: true });
-        a.on_event(Event::Seeded(Some(nid("f"))));
-        a.on_event(Event::Expanded(nid("f"), Expansion::default()));
+        a.on_event(Event::Seeded(Some(node("f"))));
+        a.on_event(Event::Expanded(
+            nid("f"),
+            ResolvedExpansion { callers: vec![], callees: vec![] },
+        ));
         let out = rendered(&a);
         assert!(!out.contains(SPINNER), "resolved-and-empty must not look pending:\n{out}");
+    }
+
+    #[test]
+    fn the_centre_pane_shows_a_short_location_not_a_raw_uri() {
+        // Gap B: the raw `file://` uri gets clipped mid-path by the pane's
+        // width, cutting off exactly the filename and line number that make
+        // it useful. The spec's mockup shows `transport.rs:88`.
+        let mut a = App::new();
+        a.on_event(Event::Ready { can_search: true });
+        let n = Node {
+            id: NodeId {
+                uri: "file:///home/user/project/src/lib.rs".into(),
+                line: 4,
+                character: 0,
+                name: "middle".into(),
+            },
+            kind_name: "Function".into(),
+            detail: Some("fn middle(x: i32) -> i32".into()),
+            state: NodeState::Unexpanded,
+        };
+        a.on_event(Event::Seeded(Some(n)));
+        let out = rendered(&a);
+        assert!(out.contains("lib.rs:5"), "must show a short location:\n{out}");
+        assert!(!out.contains("file://"), "must not leak the raw uri:\n{out}");
     }
 
     #[test]

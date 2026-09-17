@@ -1,7 +1,7 @@
 //! All interface behaviour, with no rendering and no engine.
 
 use crate::protocol::{Event, Request};
-use lspgraph_core::graph::{Expansion, Node, NodeId, NodeState, UnresolvedReason};
+use lspgraph_core::graph::{Node, NodeId, NodeState};
 use lspgraph_core::symbols::SymbolMatch;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,18 +56,6 @@ impl App {
             callee_sel: 0,
             error: None,
             should_quit: false,
-        }
-    }
-
-    /// A freshly-seen node id, not yet expanded. Shared by `Seeded` (the
-    /// initial focus) and `Expanded` (the neighbours it reveals) so the two
-    /// arms cannot drift apart on how a `Node` is built.
-    fn unexpanded_node(id: NodeId) -> Node {
-        Node {
-            id,
-            kind_name: "Function".into(),
-            detail: None,
-            state: NodeState::Unexpanded,
         }
     }
 
@@ -157,10 +145,6 @@ impl App {
 
     pub fn on_event(&mut self, ev: Event) -> Vec<Request> {
         match ev {
-            Event::Progress(p) => {
-                self.progress = p;
-                Vec::new()
-            }
             Event::Ready { can_search } => {
                 self.can_search = can_search;
                 self.screen = Screen::Search;
@@ -171,9 +155,10 @@ impl App {
                 self.match_sel = 0;
                 Vec::new()
             }
-            Event::Seeded(Some(id)) => {
+            Event::Seeded(Some(node)) => {
                 self.screen = Screen::Graph;
-                self.focus = Some(Self::unexpanded_node(id.clone()));
+                let id = node.id.clone();
+                self.focus = Some(node);
                 self.callers.clear();
                 self.callees.clear();
                 self.caller_sel = 0;
@@ -193,8 +178,8 @@ impl App {
                 // issues an `Expand`, so it is the current request's id.
                 if self.pending.as_ref() == Some(&id) {
                     self.pending = None;
-                    self.callers = exp.callers.iter().cloned().map(Self::unexpanded_node).collect();
-                    self.callees = exp.callees.iter().cloned().map(Self::unexpanded_node).collect();
+                    self.callers = exp.callers;
+                    self.callees = exp.callees;
                     self.caller_sel = 0;
                     self.callee_sel = 0;
                 }
@@ -324,6 +309,8 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::ResolvedExpansion;
+    use lspgraph_core::graph::UnresolvedReason;
 
     fn nid(name: &str) -> NodeId {
         NodeId {
@@ -340,6 +327,24 @@ mod tests {
             detail: None,
             state,
         }
+    }
+
+    /// A `Seeded` event carrying a freshly-built, detail-less `Node` — the
+    /// shape most tests need when the detail text itself is not under test.
+    fn seeded(name: &str) -> Event {
+        Event::Seeded(Some(node(name, NodeState::Unexpanded)))
+    }
+
+    /// An `Expanded` event whose endpoints are detail-less `Node`s named by
+    /// `callers`/`callees`.
+    fn expanded(name: &str, callers: &[&str], callees: &[&str]) -> Event {
+        Event::Expanded(
+            nid(name),
+            ResolvedExpansion {
+                callers: callers.iter().map(|n| node(n, NodeState::Unexpanded)).collect(),
+                callees: callees.iter().map(|n| node(n, NodeState::Unexpanded)).collect(),
+            },
+        )
     }
 
     fn a_ready(can_search: bool) -> App {
@@ -359,14 +364,6 @@ mod tests {
     }
 
     #[test]
-    fn progress_events_update_the_starting_screen() {
-        let mut a = App::new();
-        a.on_event(Event::Progress("indexing".into()));
-        assert_eq!(a.progress(), "indexing");
-        assert_eq!(a.screen(), Screen::Starting);
-    }
-
-    #[test]
     fn ready_moves_to_search_and_records_search_availability() {
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: false });
@@ -378,7 +375,7 @@ mod tests {
     fn seeding_moves_to_the_graph_and_requests_an_expansion() {
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: true });
-        let reqs = a.on_event(Event::Seeded(Some(nid("f"))));
+        let reqs = a.on_event(seeded("f"));
         assert_eq!(a.screen(), Screen::Graph);
         assert_eq!(reqs, vec![Request::Expand(nid("f"))]);
         assert!(a.is_pending(), "expansion in flight must read as pending");
@@ -388,14 +385,8 @@ mod tests {
     fn an_expansion_clears_pending_and_fills_both_panes() {
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: true });
-        a.on_event(Event::Seeded(Some(nid("f"))));
-        a.on_event(Event::Expanded(
-            nid("f"),
-            Expansion {
-                callers: vec![nid("up")],
-                callees: vec![nid("down")],
-            },
-        ));
+        a.on_event(seeded("f"));
+        a.on_event(expanded("f", &["up"], &["down"]));
         assert!(!a.is_pending());
         assert_eq!(a.callers().len(), 1);
         assert_eq!(a.callees().len(), 1);
@@ -406,8 +397,8 @@ mod tests {
         // "no callers" is a real answer and must not look like "still loading".
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: true });
-        a.on_event(Event::Seeded(Some(nid("f"))));
-        a.on_event(Event::Expanded(nid("f"), Expansion::default()));
+        a.on_event(seeded("f"));
+        a.on_event(expanded("f", &[], &[]));
         assert!(!a.is_pending(), "an empty result is resolved, not pending");
         assert!(a.callers().is_empty());
     }
@@ -416,14 +407,8 @@ mod tests {
     fn recentring_pushes_history_and_asks_for_the_new_expansion() {
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: true });
-        a.on_event(Event::Seeded(Some(nid("f"))));
-        a.on_event(Event::Expanded(
-            nid("f"),
-            Expansion {
-                callers: vec![nid("up")],
-                callees: vec![],
-            },
-        ));
+        a.on_event(seeded("f"));
+        a.on_event(expanded("f", &["up"], &[]));
         let req = a.recentre().expect("a caller is selected");
         assert_eq!(req, Request::Expand(nid("up")));
         assert_eq!(a.breadcrumb(), vec!["f", "up"]);
@@ -433,14 +418,8 @@ mod tests {
     fn back_pops_history() {
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: true });
-        a.on_event(Event::Seeded(Some(nid("f"))));
-        a.on_event(Event::Expanded(
-            nid("f"),
-            Expansion {
-                callers: vec![nid("up")],
-                callees: vec![],
-            },
-        ));
+        a.on_event(seeded("f"));
+        a.on_event(expanded("f", &["up"], &[]));
         a.recentre();
         a.back();
         assert_eq!(a.breadcrumb(), vec!["f"]);
@@ -450,7 +429,7 @@ mod tests {
     fn back_at_the_root_does_nothing() {
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: true });
-        a.on_event(Event::Seeded(Some(nid("f"))));
+        a.on_event(seeded("f"));
         assert!(a.back().is_none());
         assert_eq!(a.breadcrumb(), vec!["f"]);
     }
@@ -488,7 +467,7 @@ mod tests {
     fn an_unresolved_focus_explains_itself_in_the_status_line() {
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: true });
-        a.on_event(Event::Seeded(Some(nid("over"))));
+        a.on_event(seeded("over"));
         a.set_focus_for_test(node(
             "over",
             NodeState::Unresolved(UnresolvedReason::NoCallHierarchyItem),
@@ -504,7 +483,7 @@ mod tests {
     fn a_transient_unresolved_focus_says_it_may_resolve_later() {
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: true });
-        a.on_event(Event::Seeded(Some(nid("x"))));
+        a.on_event(seeded("x"));
         a.set_focus_for_test(node(
             "x",
             NodeState::Unresolved(UnresolvedReason::TransientContentModified),
@@ -516,14 +495,8 @@ mod tests {
     fn selection_is_clamped_at_both_ends() {
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: true });
-        a.on_event(Event::Seeded(Some(nid("f"))));
-        a.on_event(Event::Expanded(
-            nid("f"),
-            Expansion {
-                callers: vec![nid("a"), nid("b")],
-                callees: vec![],
-            },
-        ));
+        a.on_event(seeded("f"));
+        a.on_event(expanded("f", &["a", "b"], &[]));
         a.select_prev();
         assert_eq!(a.selected_index(Pane::Callers), 0);
         a.select_next();
@@ -547,26 +520,14 @@ mod tests {
     fn a_stale_expansion_does_not_overwrite_the_current_panes() {
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: true });
-        a.on_event(Event::Seeded(Some(nid("f"))));
-        a.on_event(Event::Expanded(
-            nid("f"),
-            Expansion {
-                callers: vec![nid("up")],
-                callees: vec![],
-            },
-        ));
+        a.on_event(seeded("f"));
+        a.on_event(expanded("f", &["up"], &[]));
         // Re-centre onto "up" (Expand(up) in flight), then go back to "f"
         // (Expand(f) in flight) before "up"'s answer arrives.
         a.recentre();
         a.back();
         // The late response for "up" arrives after we've already moved on.
-        a.on_event(Event::Expanded(
-            nid("up"),
-            Expansion {
-                callers: vec![nid("ghost")],
-                callees: vec![nid("ghost2")],
-            },
-        ));
+        a.on_event(expanded("up", &["ghost"], &["ghost2"]));
         assert_eq!(a.focus().unwrap().id.name, "f", "focus must still be f");
         assert!(!a.callers().iter().any(|n| n.id.name == "ghost"));
         assert!(!a.callees().iter().any(|n| n.id.name == "ghost2"));
@@ -597,5 +558,44 @@ mod tests {
     fn an_empty_query_is_not_submitted() {
         let mut a = a_ready(true);
         assert_eq!(a.submit_query(), None);
+    }
+
+    #[test]
+    fn a_seeded_nodes_detail_reaches_the_focus() {
+        // Gap A: the worker resolves the seeded id to a full `Node` before
+        // sending it, so the signature must survive into `App::focus`
+        // rather than being rebuilt with `detail: None`.
+        let mut a = App::new();
+        a.on_event(Event::Ready { can_search: true });
+        let mut middle = node("middle", NodeState::Unexpanded);
+        middle.detail = Some("fn middle(x: i32) -> i32".into());
+        a.on_event(Event::Seeded(Some(middle)));
+        assert_eq!(
+            a.focus().unwrap().detail.as_deref(),
+            Some("fn middle(x: i32) -> i32")
+        );
+    }
+
+    #[test]
+    fn an_expanded_nodes_detail_reaches_its_pane() {
+        // Same guarantee for the neighbours an expansion reveals: their
+        // `Node`s (and thus `detail`) come from the worker's resolution, not
+        // from a bare id rebuilt on this side.
+        let mut a = App::new();
+        a.on_event(Event::Ready { can_search: true });
+        a.on_event(seeded("f"));
+        let mut caller = node("up", NodeState::Unexpanded);
+        caller.detail = Some("fn up() -> i32".into());
+        a.on_event(Event::Expanded(
+            nid("f"),
+            ResolvedExpansion {
+                callers: vec![caller],
+                callees: vec![],
+            },
+        ));
+        assert_eq!(
+            a.callers()[0].detail.as_deref(),
+            Some("fn up() -> i32")
+        );
     }
 }

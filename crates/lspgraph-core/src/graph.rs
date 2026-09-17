@@ -56,7 +56,7 @@ pub enum NodeState {
     Unresolved(UnresolvedReason),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
     pub kind_name: String,

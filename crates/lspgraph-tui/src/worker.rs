@@ -1,8 +1,8 @@
 //! Owns the engine on its own thread so the render loop never blocks.
 
-use crate::protocol::{EngineOps, Event, Request};
+use crate::protocol::{EngineOps, Event, Request, ResolvedExpansion};
 use lspgraph_core::engine::Engine;
-use lspgraph_core::graph::{Expansion, Node, NodeId};
+use lspgraph_core::graph::{Expansion, Node, NodeId, NodeState};
 use lspgraph_core::symbols::SymbolMatch;
 use lspgraph_core::Result;
 use std::sync::mpsc::{Receiver, Sender};
@@ -33,6 +33,20 @@ impl EngineOps for CoreEngine {
     fn shutdown(self: Box<Self>) -> Result<()> {
         self.engine.shutdown()
     }
+}
+
+/// Resolves an endpoint id to the graph's full `Node` so the interface can
+/// show its signature. The graph is expected to know every id it just
+/// handed back from `seed`/`expand`, but if it somehow does not, this still
+/// hands back a usable (if detail-less) `Node` rather than dropping the
+/// endpoint.
+fn resolve(engine: &dyn EngineOps, id: NodeId) -> Node {
+    engine.node(&id).unwrap_or_else(|| Node {
+        id,
+        kind_name: "Function".into(),
+        detail: None,
+        state: NodeState::Unexpanded,
+    })
 }
 
 pub fn spawn_worker(
@@ -67,7 +81,8 @@ pub fn spawn_worker(
                 },
                 Request::Seed(m) => match engine.seed(&m) {
                     Ok(id) => {
-                        let _ = tx.send(Event::Seeded(id));
+                        let node = id.map(|nid| resolve(engine.as_ref(), nid));
+                        let _ = tx.send(Event::Seeded(node));
                     }
                     Err(e) => {
                         let _ = tx.send(Event::Warning(e.to_string()));
@@ -75,7 +90,19 @@ pub fn spawn_worker(
                 },
                 Request::Expand(id) => match engine.expand(&id) {
                     Ok(exp) => {
-                        let _ = tx.send(Event::Expanded(id, exp));
+                        let resolved = ResolvedExpansion {
+                            callers: exp
+                                .callers
+                                .into_iter()
+                                .map(|nid| resolve(engine.as_ref(), nid))
+                                .collect(),
+                            callees: exp
+                                .callees
+                                .into_iter()
+                                .map(|nid| resolve(engine.as_ref(), nid))
+                                .collect(),
+                        };
+                        let _ = tx.send(Event::Expanded(id, resolved));
                     }
                     Err(e) => {
                         let _ = tx.send(Event::Failed(id, e.to_string()));

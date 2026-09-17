@@ -91,12 +91,15 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Vec<Request> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::Event;
-    use lspgraph_core::graph::{Expansion, NodeId};
+    use crate::protocol::{Event, ResolvedExpansion};
+    use lspgraph_core::graph::{Node, NodeId, NodeState};
     use ratatui::crossterm::event::KeyCode;
 
     fn nid(name: &str) -> NodeId {
         NodeId { uri: "file:///a.rs".into(), line: 1, character: 3, name: name.into() }
+    }
+    fn node(name: &str) -> Node {
+        Node { id: nid(name), kind_name: "Function".into(), detail: None, state: NodeState::Unexpanded }
     }
     fn k(code: KeyCode) -> KeyEvent {
         KeyEvent::from(code)
@@ -105,10 +108,10 @@ mod tests {
     fn graph_app() -> App {
         let mut a = App::new();
         a.on_event(Event::Ready { can_search: true });
-        a.on_event(Event::Seeded(Some(nid("f"))));
+        a.on_event(Event::Seeded(Some(node("f"))));
         a.on_event(Event::Expanded(
             nid("f"),
-            Expansion { callers: vec![nid("up")], callees: vec![nid("down")] },
+            ResolvedExpansion { callers: vec![node("up")], callees: vec![node("down")] },
         ));
         a
     }

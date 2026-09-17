@@ -18,15 +18,14 @@ pub enum Request {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    /// Human-readable startup progress, forwarded so a 28-second wait is
-    /// legible rather than looking like a hang.
-    Progress(String),
     /// The server is ready. `can_search` is false when it does not advertise
     /// `workspaceSymbolProvider`.
     Ready { can_search: bool },
     Matches(Vec<SymbolMatch>),
-    Seeded(Option<NodeId>),
-    Expanded(NodeId, Expansion),
+    /// The seeded symbol, resolved to its full `Node` (signature and all) so
+    /// the interface never has to fall back to a bare name.
+    Seeded(Option<Node>),
+    Expanded(NodeId, ResolvedExpansion),
     /// A per-node failure. The session continues.
     Failed(NodeId, String),
     /// A recoverable failure with no particular node to blame — a failed
@@ -34,6 +33,14 @@ pub enum Event {
     Warning(String),
     /// The session cannot continue.
     Fatal(String),
+}
+
+/// An expansion whose endpoints have been resolved to full `Node`s, so the
+/// interface can show each symbol's signature rather than just its name.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedExpansion {
+    pub callers: Vec<Node>,
+    pub callees: Vec<Node>,
 }
 
 /// What the worker needs from an engine. Implemented for the real

@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 pub fn draw_error(f: &mut Frame, area: Rect, msg: &str) {
-    let w = area.width.saturating_sub(8).min(70).max(20);
+    let w = area.width.saturating_sub(8).clamp(20, 70);
     let h = 7u16.min(area.height);
     let rect = Rect {
         x: area.x + (area.width.saturating_sub(w)) / 2,
