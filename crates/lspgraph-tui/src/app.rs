@@ -98,6 +98,10 @@ impl App {
     pub fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }
+
+    pub fn dismiss_error(&mut self) {
+        self.error = None;
+    }
     pub fn pane(&self) -> Pane {
         self.pane
     }

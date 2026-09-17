@@ -1,4 +1,5 @@
 pub mod graph;
+pub mod overlay;
 pub mod search;
 
 use crate::app::{App, Screen};
@@ -15,5 +16,8 @@ pub fn draw(f: &mut Frame, app: &App) {
                 f.area(),
             );
         }
+    }
+    if let Some(e) = app.error() {
+        overlay::draw_error(f, f.area(), e);
     }
 }

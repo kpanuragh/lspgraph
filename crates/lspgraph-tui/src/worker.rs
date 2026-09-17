@@ -49,7 +49,13 @@ pub fn spawn_worker(
             match req {
                 Request::Shutdown => break,
                 Request::Restart => {
-                    let _ = tx.send(Event::Fatal("restart is not implemented".into()));
+                    // The worker owns an engine but not the recipe for building
+                    // one; main.rs holds the config and root. Ending the loop
+                    // shuts this engine down cleanly and lets main decide.
+                    let _ = tx.send(Event::Fatal(
+                        "language server restart requires relaunching lspgraph".into(),
+                    ));
+                    break;
                 }
                 Request::Search(q) => match engine.search(&q) {
                     Ok(ms) => {
@@ -234,6 +240,23 @@ mod tests {
         qtx.send(Request::Shutdown).unwrap();
         h.join().unwrap();
         assert!(flag.load(std::sync::atomic::Ordering::SeqCst), "engine was not shut down");
+    }
+
+    #[test]
+    fn restart_reports_clearly_and_shuts_down_rather_than_hanging() {
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (qtx, qrx) = channel();
+        let (etx, erx) = channel();
+        let h = spawn_worker(
+            Box::new(Stub { shutdown_flag: Some(flag.clone()), ..Default::default() }),
+            qrx,
+            etx,
+        );
+        let _ = recv(&erx);
+        qtx.send(Request::Restart).unwrap();
+        assert!(matches!(recv(&erx), Event::Fatal(_)));
+        h.join().unwrap();
+        assert!(flag.load(std::sync::atomic::Ordering::SeqCst));
     }
 
     #[test]

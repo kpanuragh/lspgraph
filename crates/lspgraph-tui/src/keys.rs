@@ -5,6 +5,23 @@ use crate::protocol::Request;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
 
 pub fn handle_key(app: &mut App, key: KeyEvent) -> Vec<Request> {
+    if app.error().is_some() {
+        match key.code {
+            KeyCode::Esc => {
+                app.dismiss_error();
+                return Vec::new();
+            }
+            KeyCode::Char('r') => {
+                app.dismiss_error();
+                return vec![Request::Restart];
+            }
+            KeyCode::Char('q') => {
+                app.should_quit = true;
+                return Vec::new();
+            }
+            _ => return Vec::new(),
+        }
+    }
     match app.screen() {
         Screen::Starting => Vec::new(),
         Screen::Search => match key.code {
