@@ -228,16 +228,24 @@ mod tests {
 
     #[test]
     fn a_deleted_file_counts_as_stale() {
-        let path = "/definitely/not/here-lspgraph-cache-test.rs";
+        // Must be absolute but must not exist. A hardcoded POSIX literal
+        // would not be absolute on Windows, so build it from the platform's
+        // own notion of an absolute directory instead.
+        let path = std::env::temp_dir()
+            .join(format!(
+                "definitely-not-here-lspgraph-cache-test-{}.rs",
+                std::process::id()
+            ))
+            .to_str()
+            .unwrap()
+            .to_string();
         let mut cache = CacheFile::new(CallGraph::new());
-        cache
-            .file_hashes
-            .insert(path.to_string(), "abc".to_string());
+        cache.file_hashes.insert(path.clone(), "abc".to_string());
         let stale = stale_files(&cache, Path::new("/"));
         assert_eq!(stale.len(), 1);
         assert_eq!(
             stale[0],
-            crate::server::path_to_uri(Path::new(path)).to_string()
+            crate::server::path_to_uri(Path::new(&path)).to_string()
         );
     }
 

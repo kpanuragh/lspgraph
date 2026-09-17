@@ -312,6 +312,9 @@ mod tests {
         assert!(unwrap_calls(Value::Null, "from").is_empty());
     }
 
+    // `/tmp/x.rs` is only absolute in POSIX path semantics; on Windows
+    // `Url::from_file_path` rejects it and `path_to_uri` panics.
+    #[cfg(unix)]
     #[test]
     fn builds_a_file_uri() {
         let u = path_to_uri(Path::new("/tmp/x.rs"));
