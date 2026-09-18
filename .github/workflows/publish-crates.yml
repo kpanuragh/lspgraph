@@ -1,12 +1,16 @@
 name: Publish to crates.io
 
-# Runs after a release is published, so the crates go out only once the binaries
-# for that tag have actually built. workflow_dispatch is here because a publish
-# can fail halfway -- crates.io is append-only, so a retry must be possible
-# without cutting a new version.
+# Called by the release workflow once the release exists, so the crates go out
+# only after the binaries for that tag have built. Also dispatchable against a
+# tag, because a publish can fail halfway and crates.io is append-only -- a
+# retry has to be possible without cutting a new version.
+#
+# NOT triggered by `release: published`. GitHub does not raise
+# workflow-triggering events for actions taken with GITHUB_TOKEN, so a release
+# created by the release workflow never fires that event. This was written that
+# way first and simply never ran.
 on:
-  release:
-    types: [published]
+  workflow_call:
   workflow_dispatch:
 
 env:
@@ -16,7 +20,9 @@ jobs:
   publish:
     # A pre-release is a pre-release. Pushing one to crates.io would make it the
     # version `cargo add lspgraph-core` resolves to.
-    if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
+    # A hyphen in the tag means a pre-release by semver. Publishing one would
+    # make it the version `cargo add` resolves to.
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

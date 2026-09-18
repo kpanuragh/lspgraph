@@ -3,14 +3,20 @@ name: Update the Homebrew tap
 # The formula pins a version and four checksums, so it goes stale the moment a
 # release is cut. Regenerating it from the release's own SHA256SUMS keeps the
 # tap correct without anyone editing four hashes by hand.
+#
+# Called by the release workflow once the release exists, and dispatchable
+# against a tag to retry. NOT triggered by `release: published`: GitHub does not
+# raise workflow-triggering events for actions taken with GITHUB_TOKEN, so a
+# release created by the release workflow never fires that event.
 on:
-  release:
-    types: [published]
+  workflow_call:
   workflow_dispatch:
 
 jobs:
   formula:
-    if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
+    # A hyphen in the tag means a pre-release by semver. Publishing one would
+    # make it the version `cargo add` resolves to.
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     steps:
       - name: Build the formula from the release's checksums
