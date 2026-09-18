@@ -121,6 +121,28 @@ curl -sLO https://github.com/kpanuragh/lspgraph/releases/latest/download/SHA256S
 sha256sum -c --ignore-missing SHA256SUMS
 ```
 
+### Homebrew
+
+```sh
+brew tap kpanuragh/tap
+brew install lspgraph
+```
+
+### Debian and RPM packages
+
+Every release carries `.deb` and `.rpm` packages for x86_64 and aarch64. They
+wrap the same statically linked binary as the archives, so they declare no
+shared-library dependencies and install regardless of the distribution's glibc
+version.
+
+```sh
+sudo dpkg -i lspgraph_<version>-1_amd64.deb
+sudo rpm -i lspgraph-<version>-1.x86_64.rpm
+```
+
+However you install it, `lspgraph` drives a language server and does not bundle
+one — see [Configuration](#configuration).
+
 [releases]: https://github.com/kpanuragh/lspgraph/releases/latest
 
 Windows binaries are built and unit-tested in CI, including every terminal
