@@ -128,6 +128,18 @@ brew tap kpanuragh/tap
 brew install lspgraph
 ```
 
+### From crates.io
+
+```sh
+cargo install lspgraph-tui
+```
+
+That builds from source and installs a binary called `lspgraph`. The engine is
+published separately as [`lspgraph-core`][core] for anyone who wants the call
+graph without a terminal interface.
+
+[core]: https://crates.io/crates/lspgraph-core
+
 ### Debian and RPM packages
 
 Every release carries `.deb` and `.rpm` packages for x86_64 and aarch64. They
