@@ -90,28 +90,30 @@ file, set `LSPGRAPH_SERVERS_TOML` to an override file.
 
 ## Install
 
-There is no stable release yet. A pre-release, `v0.1.0-rc1`, is available on
-the [releases page][releases] — download a binary from it, or build from
-source with `cargo build --release`.
+Download a binary from the [releases page][releases], or build from source with
+`cargo build --release`.
 
 ```sh
-# Linux x86_64, statically linked — runs on any distribution
-curl -sL https://github.com/kpanuragh/lspgraph/releases/download/v0.1.0-rc1/lspgraph-v0.1.0-rc1-x86_64-unknown-linux-musl.tar.gz | tar xz
-./lspgraph-v0.1.0-rc1-x86_64-unknown-linux-musl/lspgraph rust /path/to/project
+# Linux x86_64, statically linked -- runs on any distribution
+curl -sL https://github.com/kpanuragh/lspgraph/releases/download/v0.1.0/lspgraph-v0.1.0-x86_64-unknown-linux-musl.tar.gz | tar xz
+./lspgraph-v0.1.0-x86_64-unknown-linux-musl/lspgraph rust /path/to/project
 ```
 
-Binaries are published for Linux (x86_64 and aarch64, static), macOS (Intel
-and Apple Silicon) and Windows (x86_64):
+Binaries are published for Linux (x86_64 and aarch64, static), macOS (Intel and
+Apple Silicon) and Windows (x86_64). Every archive contains the binary, this
+README and both licences, and every release carries a `SHA256SUMS` file
+alongside them:
 
-- `lspgraph-v0.1.0-rc1-x86_64-unknown-linux-musl.tar.gz`
-- `lspgraph-v0.1.0-rc1-aarch64-unknown-linux-musl.tar.gz`
-- `lspgraph-v0.1.0-rc1-x86_64-apple-darwin.tar.gz`
-- `lspgraph-v0.1.0-rc1-aarch64-apple-darwin.tar.gz`
-- `lspgraph-v0.1.0-rc1-x86_64-pc-windows-msvc.zip`
+```sh
+sha256sum -c --ignore-missing SHA256SUMS
+```
 
-Every release carries a `SHA256SUMS` file alongside the binaries.
+Asset names embed the version, so substitute the release you want:
+`lspgraph-<version>-<target>.tar.gz`, or `.zip` for Windows, where `<target>`
+is one of `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`,
+`x86_64-apple-darwin`, `aarch64-apple-darwin` or `x86_64-pc-windows-msvc`.
 
-[releases]: https://github.com/kpanuragh/lspgraph/releases/tag/v0.1.0-rc1
+[releases]: https://github.com/kpanuragh/lspgraph/releases/latest
 
 Windows binaries are built and unit-tested in CI, including every terminal
 rendering test. The interactive path — raw mode and the alternate screen on a
