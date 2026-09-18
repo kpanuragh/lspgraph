@@ -10,6 +10,15 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Every server is pinned, so a green run says what it was green against and a
+  # failure can be bisected against a version change. Bump these deliberately.
+  VTSLS_VERSION: "0.3.0"
+  BASEDPYRIGHT_VERSION: "1.40.1"
+  GOPLS_VERSION: "v0.23.0"
+  # Ubuntu noble ships clangd 18.1.3, which answers callHierarchy/outgoingCalls
+  # with "method not found" -- it never implemented that half of call hierarchy.
+  CLANGD_VERSION: "23.1.0"
+  CLANGD_SHA256: "e53b1a96196095faedb7642cf64964f7fb9ad4a0c1f00dd2c172a3d9dcbafdfd"
 
 jobs:
   integration:
@@ -39,17 +48,17 @@ jobs:
       - name: Install language servers
         run: |
           set -euxo pipefail
-          npm install -g @vtsls/language-server
-          pip install basedpyright
-          go install golang.org/x/tools/gopls@latest
-          # Ubuntu noble's packaged clangd is 18.1.3, which answers
-          # callHierarchy/outgoingCalls with "method not found" (it never
-          # implemented that half of call hierarchy). Install a pinned
-          # upstream release instead, which does.
+          npm install -g "@vtsls/language-server@${VTSLS_VERSION}"
+          pip install "basedpyright==${BASEDPYRIGHT_VERSION}"
+          go install "golang.org/x/tools/gopls@${GOPLS_VERSION}"
+
           curl -fsSL -o /tmp/clangd.zip \
-            https://github.com/clangd/clangd/releases/download/23.1.0/clangd-linux-23.1.0.zip
+            "https://github.com/clangd/clangd/releases/download/${CLANGD_VERSION}/clangd-linux-${CLANGD_VERSION}.zip"
+          # Verify before unzipping: the suite executes this archive, and a
+          # version tag alone does not prove the bytes are the ones intended.
+          echo "${CLANGD_SHA256}  /tmp/clangd.zip" | sha256sum -c -
           unzip -q /tmp/clangd.zip -d "$HOME"
-          echo "$HOME/clangd_23.1.0/bin" >> "$GITHUB_PATH"
+          echo "$HOME/clangd_${CLANGD_VERSION}/bin" >> "$GITHUB_PATH"
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: Record server versions
