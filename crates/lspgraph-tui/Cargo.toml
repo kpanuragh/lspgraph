@@ -1,6 +1,6 @@
 [package]
 name = "lspgraph-tui"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -16,5 +16,5 @@ name = "lspgraph"
 path = "src/main.rs"
 
 [dependencies]
-lspgraph-core = { path = "../lspgraph-core", version = "0.1.0" }
+lspgraph-core = { path = "../lspgraph-core", version = "0.1.1" }
 ratatui = "0.30"
