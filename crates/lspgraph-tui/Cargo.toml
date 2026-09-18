@@ -1,6 +1,6 @@
 [package]
 name = "lspgraph-tui"
-version = "0.1.1"
+version = "0.1.2"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -16,7 +16,7 @@ name = "lspgraph"
 path = "src/main.rs"
 
 [dependencies]
-lspgraph-core = { path = "../lspgraph-core", version = "0.1.1" }
+lspgraph-core = { path = "../lspgraph-core", version = "0.1.2" }
 ratatui = "0.30"
 
 # Distro packages. Both tools build from the same static musl binary, so the
