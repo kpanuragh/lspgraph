@@ -103,10 +103,58 @@ jobs:
             *.zip
           if-no-files-found: error
 
+  # Distro packages, built from the same static musl binary as the archives, so
+  # they carry no shared-library dependencies and install on any release of a
+  # distribution rather than only the one they were built on.
+  packages:
+    needs: guard
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: pkg-${{ matrix.target }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb,cargo-generate-rpm
+
+      - name: Use rust-lld for the aarch64 musl cross build
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=rust-lld" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: cargo build --release -p lspgraph-tui --target ${{ matrix.target }}
+
+      # --no-build so the package wraps the binary just built above, rather than
+      # triggering a second compile with different flags.
+      - name: Package
+        run: |
+          set -euo pipefail
+          cargo deb -p lspgraph-tui --target ${{ matrix.target }} --no-build
+          cargo generate-rpm -p crates/lspgraph-tui --target ${{ matrix.target }}
+          mkdir -p dist
+          find target -name '*.deb' -o -name '*.rpm' | while read -r f; do
+            echo "packaged $f"
+            cp "$f" dist/
+          done
+          ls -1 dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
   publish:
     permissions:
       contents: write
-    needs: build
+    needs: [build, packages]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

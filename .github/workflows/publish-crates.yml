@@ -1,0 +1,67 @@
+name: Publish to crates.io
+
+# Runs after a release is published, so the crates go out only once the binaries
+# for that tag have actually built. workflow_dispatch is here because a publish
+# can fail halfway -- crates.io is append-only, so a retry must be possible
+# without cutting a new version.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    # A pre-release is a pre-release. Pushing one to crates.io would make it the
+    # version `cargo add lspgraph-core` resolves to.
+    if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Same check the release workflow runs. crates.io versions cannot be
+      # replaced or reused, so publishing the wrong one is unrecoverable.
+      - name: The tag's version core must match both manifests
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          core="${tag%%-*}"
+          for manifest in crates/lspgraph-core/Cargo.toml crates/lspgraph-tui/Cargo.toml; do
+            crate=$(grep -m1 '^version' "$manifest" | sed -E 's/.*"(.*)".*/\1/')
+            echo "tag=$tag core=$core $manifest=$crate"
+            if [ "$core" != "$crate" ]; then
+              echo "::error::tag $tag does not match $manifest version $crate"
+              exit 1
+            fi
+          done
+
+      # lspgraph-tui depends on lspgraph-core by version, so the order is forced.
+      - name: Publish lspgraph-core
+        run: cargo publish -p lspgraph-core --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      # The index does not update the instant publish returns, and a tui publish
+      # that races it fails with "no matching package named lspgraph-core".
+      - name: Wait for the index to carry the new lspgraph-core
+        run: |
+          set -euo pipefail
+          version=$(grep -m1 '^version' crates/lspgraph-core/Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
+          for attempt in $(seq 1 30); do
+            if curl -fsSL "https://crates.io/api/v1/crates/lspgraph-core/${version}" \
+                 -H 'User-Agent: lspgraph-release (github actions)' >/dev/null 2>&1; then
+              echo "lspgraph-core ${version} is on the index after ${attempt} attempt(s)"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::lspgraph-core ${version} did not appear on the index within 5 minutes"
+          exit 1
+
+      - name: Publish lspgraph-tui
+        run: cargo publish -p lspgraph-tui --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

@@ -18,3 +18,30 @@ path = "src/main.rs"
 [dependencies]
 lspgraph-core = { path = "../lspgraph-core", version = "0.1.1" }
 ratatui = "0.30"
+
+# Distro packages. Both tools build from the same static musl binary, so the
+# packages carry no shared-library dependencies and install on any release of a
+# distribution rather than the one they were built on.
+[package.metadata.deb]
+name = "lspgraph"
+maintainer = "K Panuragh <kpanuragh@gmail.com>"
+copyright = "2026, K Panuragh <kpanuragh@gmail.com>"
+section = "devel"
+priority = "optional"
+extended-description = """\
+lspgraph explores a codebase's call graph in the terminal by driving a Language \
+Server Protocol server. It contains no per-language code: support for a language \
+is a servers.toml entry naming its language server, not a plugin. \
+A language server is required and is not bundled."""
+assets = [
+    ["target/release/lspgraph", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/lspgraph/README.md", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "lspgraph"
+summary = "Explore a codebase's call graph through any LSP server"
+assets = [
+    { source = "target/release/lspgraph", dest = "/usr/bin/lspgraph", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/lspgraph/README.md", mode = "644" },
+]
