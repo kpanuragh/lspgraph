@@ -136,13 +136,16 @@ jobs:
       - name: Package
         run: |
           set -euo pipefail
-          cargo deb -p lspgraph-tui --target ${{ matrix.target }} --no-build
+          # --no-strip because the binary is already stripped by rustc (see
+          # [profile.release] in the workspace manifest), and cargo-deb would
+          # otherwise run the host's strip against a foreign-architecture ELF.
+          # cargo-deb prints the path it wrote on stdout; take it from there
+          # rather than searching, because it leaves a copy under two paths.
+          deb=$(cargo deb -p lspgraph-tui --target ${{ matrix.target }} --no-build --no-strip)
           cargo generate-rpm -p crates/lspgraph-tui --target ${{ matrix.target }}
           mkdir -p dist
-          find target -name '*.deb' -o -name '*.rpm' | while read -r f; do
-            echo "packaged $f"
-            cp "$f" dist/
-          done
+          cp "$deb" dist/
+          cp target/${{ matrix.target }}/generate-rpm/*.rpm dist/
           ls -1 dist
 
       - uses: actions/upload-artifact@v4
