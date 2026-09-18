@@ -16,11 +16,28 @@ pub const NO_SEARCH_MSG: &str = "this language server does not support workspace
 /// never authoritative about the whole repository.
 pub const NO_MATCHES_MSG: &str = "no matches among the files opened so far";
 
+/// Shown before anything has been searched for. Without it the screen is two
+/// empty boxes and a prompt: nothing states that Enter runs the search, and an
+/// empty pane titled "matches" reads as "zero matches" rather than "nothing
+/// asked yet". The graph view has carried a key line from the start; this is
+/// the same affordance for the screen the user actually lands on first.
+pub const IDLE_HINT: &str = "type a symbol name, then press Enter to search";
+
+/// The keys this screen answers to. `q` is absent on purpose: it is a character
+/// and goes into the query box, so Esc and ctrl-c are the ways out.
+pub const KEY_HINT: &str = "Enter search · ↑/↓ select · Esc back · ctrl-c quit";
+
 pub fn draw_search(f: &mut Frame, area: Rect, app: &App) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
         .split(area);
+
+    f.render_widget(Paragraph::new(KEY_HINT), rows[2]);
 
     f.render_widget(
         Paragraph::new(format!("> {}", app.query()))
@@ -42,6 +59,21 @@ pub fn draw_search(f: &mut Frame, area: Rect, app: &App) {
     if app.searched() && app.matches().is_empty() {
         f.render_widget(
             Paragraph::new(NO_MATCHES_MSG).block(Block::default().borders(Borders::ALL)),
+            rows[1],
+        );
+        return;
+    }
+
+    // Nothing has been asked yet. Say what to do rather than rendering an empty
+    // bordered list, which looks identical to a search that found nothing.
+    if app.matches().is_empty() {
+        let msg = if app.query().is_empty() {
+            IDLE_HINT.to_string()
+        } else {
+            format!("press Enter to search for \"{}\"", app.query())
+        };
+        f.render_widget(
+            Paragraph::new(msg).block(Block::default().borders(Borders::ALL).title("matches")),
             rows[1],
         );
         return;
@@ -103,6 +135,49 @@ mod tests {
             position: Default::default(),
             kind: lspgraph_core::symbols::function_kind(),
         }
+    }
+
+    #[test]
+    fn the_idle_screen_says_what_to_do_instead_of_showing_an_empty_list() {
+        let mut a = App::new();
+        a.on_event(Event::Ready { can_search: true });
+        let out = rendered(&a);
+        assert!(
+            out.contains("type a symbol name"),
+            "the first screen the user sees must not be two empty boxes:\n{out}"
+        );
+    }
+
+    #[test]
+    fn every_screen_state_shows_the_keys() {
+        let mut a = App::new();
+        a.on_event(Event::Ready { can_search: true });
+        assert!(
+            rendered(&a).contains("ctrl-c quit"),
+            "idle screen has no keys"
+        );
+        a.push_query_char('z');
+        assert!(rendered(&a).contains("ctrl-c quit"), "typing hid the keys");
+        a.on_event(Event::Matches(vec![]));
+        assert!(
+            rendered(&a).contains("ctrl-c quit"),
+            "no-matches hid the keys"
+        );
+        a.on_event(Event::Matches(vec![a_match("zed")]));
+        assert!(rendered(&a).contains("ctrl-c quit"), "results hid the keys");
+    }
+
+    #[test]
+    fn a_typed_but_unsubmitted_query_says_enter_runs_it() {
+        let mut a = App::new();
+        a.on_event(Event::Ready { can_search: true });
+        a.push_query_char('z');
+        a.push_query_char('e');
+        let out = rendered(&a);
+        assert!(
+            out.contains("press Enter to search for"),
+            "a typed query with no results must explain itself:\n{out}"
+        );
     }
 
     #[test]

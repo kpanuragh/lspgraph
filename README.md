@@ -85,8 +85,16 @@ no code consumes it: every crawl is serial today regardless of what you set.
 Bounded-concurrency pipelining is deliberately deferred until it has been
 measured — setting this will not make anything faster.
 
-To point at servers installed outside `PATH` without editing the committed
-file, set `LSPGRAPH_SERVERS_TOML` to an override file.
+`lspgraph` looks for that file in three places, most specific first:
+
+1. `$LSPGRAPH_SERVERS_TOML`, if set
+2. `servers.toml` in the working directory
+3. `~/.config/lspgraph/servers.toml` (`%APPDATA%\lspgraph\servers.toml` on
+   Windows, `$XDG_CONFIG_HOME` honoured where set)
+
+The third is the one to use for an installed binary — put your servers there
+once and `lspgraph` works from any directory. If none exists, the error names
+every path it looked in.
 
 ## Install
 
