@@ -95,23 +95,31 @@ Download a binary from the [releases page][releases], or build from source with
 
 ```sh
 # Linux x86_64, statically linked -- runs on any distribution
-curl -sL https://github.com/kpanuragh/lspgraph/releases/download/v0.1.0/lspgraph-v0.1.0-x86_64-unknown-linux-musl.tar.gz | tar xz
-./lspgraph-v0.1.0-x86_64-unknown-linux-musl/lspgraph rust /path/to/project
+mkdir -p lspgraph
+curl -sL https://github.com/kpanuragh/lspgraph/releases/latest/download/lspgraph-x86_64-unknown-linux-musl.tar.gz \
+  | tar xz --strip-components=1 -C lspgraph
+./lspgraph/lspgraph rust /path/to/project
 ```
 
-Binaries are published for Linux (x86_64 and aarch64, static), macOS (Intel and
-Apple Silicon) and Windows (x86_64). Every archive contains the binary, this
-README and both licences, and every release carries a `SHA256SUMS` file
-alongside them:
+That URL always points at the newest release, so it does not go stale. Swap the
+target for the one you want:
+
+| Platform | Asset |
+|----------|-------|
+| Linux x86_64 (static) | `lspgraph-x86_64-unknown-linux-musl.tar.gz` |
+| Linux aarch64 (static) | `lspgraph-aarch64-unknown-linux-musl.tar.gz` |
+| macOS Intel | `lspgraph-x86_64-apple-darwin.tar.gz` |
+| macOS Apple Silicon | `lspgraph-aarch64-apple-darwin.tar.gz` |
+| Windows x86_64 | `lspgraph-x86_64-pc-windows-msvc.zip` |
+
+Each archive holds the binary, this README and both licences. Every release also
+publishes the same archives with the version in the name, for pinning, and a
+`SHA256SUMS` covering both:
 
 ```sh
+curl -sLO https://github.com/kpanuragh/lspgraph/releases/latest/download/SHA256SUMS
 sha256sum -c --ignore-missing SHA256SUMS
 ```
-
-Asset names embed the version, so substitute the release you want:
-`lspgraph-<version>-<target>.tar.gz`, or `.zip` for Windows, where `<target>`
-is one of `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`,
-`x86_64-apple-darwin`, `aarch64-apple-darwin` or `x86_64-pc-windows-msvc`.
 
 [releases]: https://github.com/kpanuragh/lspgraph/releases/latest
 
