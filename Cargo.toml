@@ -8,3 +8,9 @@ rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/kpanuragh/lspgraph"
 homepage = "https://github.com/kpanuragh/lspgraph"
+
+# rustc strips at link time, which works for every target. cargo-deb otherwise
+# shells out to the host's `strip`, and an x86_64 strip cannot read an aarch64
+# ELF -- which is exactly how the first aarch64 package build failed.
+[profile.release]
+strip = true
