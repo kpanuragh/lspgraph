@@ -3,6 +3,11 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Re-run a release without touching a published tag -- to republish after a
+  # failed job, or to add assets to a release that predates them. Dispatch it
+  # against the tag ref; the guard below still checks that tag against the
+  # manifests, so this cannot publish a mislabelled binary.
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -108,6 +113,26 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      # Asset names embed the version, so releases/latest/download/<name> can
+      # never resolve. Ship a second, unversioned copy of each archive to give
+      # every target one URL that keeps working across releases.
+      - name: Unversioned copies, for a permanent download URL
+        run: |
+          set -euo pipefail
+          cd dist
+          for f in lspgraph-"$GITHUB_REF_NAME"-*; do
+            case "$f" in
+              *.tar.gz) ext=.tar.gz ;;
+              *.zip)    ext=.zip ;;
+              *)        continue ;;
+            esac
+            base=${f%"$ext"}
+            cp "$f" "lspgraph-${base#lspgraph-$GITHUB_REF_NAME-}$ext"
+          done
+          ls -1
+
+      # Runs after the copies exist, so the sums cover what people download by
+      # either name.
       - name: Checksums
         run: |
           cd dist
