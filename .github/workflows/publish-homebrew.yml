@@ -1,0 +1,113 @@
+name: Update the Homebrew tap
+
+# The formula pins a version and four checksums, so it goes stale the moment a
+# release is cut. Regenerating it from the release's own SHA256SUMS keeps the
+# tap correct without anyone editing four hashes by hand.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  formula:
+    if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build the formula from the release's checksums
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          base="https://github.com/kpanuragh/lspgraph/releases/download/${tag}"
+
+          curl -fsSL -o SHA256SUMS "${base}/SHA256SUMS"
+          sum() {
+            # Match the versioned name exactly, so the unversioned copy of the
+            # same archive cannot be picked up instead.
+            awk -v n="lspgraph-${tag}-$1.tar.gz" '$2 == n { print $1 }' SHA256SUMS
+          }
+          mac_arm=$(sum aarch64-apple-darwin)
+          mac_x86=$(sum x86_64-apple-darwin)
+          lin_arm=$(sum aarch64-unknown-linux-musl)
+          lin_x86=$(sum x86_64-unknown-linux-musl)
+          for v in "$mac_arm" "$mac_x86" "$lin_arm" "$lin_x86"; do
+            if [ -z "$v" ]; then
+              echo "::error::a checksum was missing from ${tag} SHA256SUMS"
+              exit 1
+            fi
+          done
+
+          mkdir -p out/Formula
+          cat > out/Formula/lspgraph.rb <<RB
+          class Lspgraph < Formula
+            desc "Explore a codebase's call graph through any LSP server"
+            homepage "https://github.com/kpanuragh/lspgraph"
+            version "${version}"
+            license any_of: ["MIT", "Apache-2.0"]
+
+            on_macos do
+              on_arm do
+                url "${base}/lspgraph-${tag}-aarch64-apple-darwin.tar.gz"
+                sha256 "${mac_arm}"
+              end
+              on_intel do
+                url "${base}/lspgraph-${tag}-x86_64-apple-darwin.tar.gz"
+                sha256 "${mac_x86}"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "${base}/lspgraph-${tag}-aarch64-unknown-linux-musl.tar.gz"
+                sha256 "${lin_arm}"
+              end
+              on_intel do
+                url "${base}/lspgraph-${tag}-x86_64-unknown-linux-musl.tar.gz"
+                sha256 "${lin_x86}"
+              end
+            end
+
+            def install
+              bin.install "lspgraph"
+            end
+
+            def caveats
+              <<~EOS
+                lspgraph drives a language server; it does not bundle one. Install the
+                server for the language you want and describe it in servers.toml:
+
+                  https://github.com/kpanuragh/lspgraph#configuration
+
+                Validated against rust-analyzer, vtsls, basedpyright, gopls and clangd.
+              EOS
+            end
+
+            test do
+              # With no arguments the binary prints its usage line and exits non-zero.
+              assert_match "usage: lspgraph", shell_output("#{bin}/lspgraph 2>&1", 1)
+            end
+          end
+          RB
+          ruby -c out/Formula/lspgraph.rb
+
+      - name: Push it to the tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAP_TOKEN:-}" ]; then
+            echo "::error::HOMEBREW_TAP_TOKEN is not set; cannot update the tap"
+            exit 1
+          fi
+          git clone --depth 1 \
+            "https://x-access-token:${TAP_TOKEN}@github.com/kpanuragh/homebrew-tap.git" tap
+          cp out/Formula/lspgraph.rb tap/Formula/lspgraph.rb
+          cd tap
+          if git diff --quiet; then
+            echo "formula already matches ${GITHUB_REF_NAME}; nothing to push"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -aqm "lspgraph ${GITHUB_REF_NAME}"
+          git push
