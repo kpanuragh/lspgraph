@@ -201,3 +201,16 @@ jobs:
           files: dist/*
           generate_release_notes: true
           prerelease: ${{ steps.relkind.outputs.prerelease }}
+
+  # Chained here rather than triggered by `release: published`, which never fires
+  # for a release created with GITHUB_TOKEN. Both run at this workflow's ref, so
+  # they see the tag.
+  crates:
+    needs: publish
+    uses: ./.github/workflows/publish-crates.yml
+    secrets: inherit
+
+  homebrew:
+    needs: publish
+    uses: ./.github/workflows/publish-homebrew.yml
+    secrets: inherit
