@@ -5,6 +5,11 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "Lazily explore a codebase's call graph through any LSP server"
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["lsp", "call-graph", "code-navigation", "language-server"]
+categories = ["development-tools"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

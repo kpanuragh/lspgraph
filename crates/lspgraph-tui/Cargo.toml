@@ -5,11 +5,16 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 description = "Terminal interface for exploring a codebase's call graph"
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+keywords = ["lsp", "call-graph", "code-navigation", "tui"]
+categories = ["development-tools", "command-line-utilities"]
 
 [[bin]]
 name = "lspgraph"
 path = "src/main.rs"
 
 [dependencies]
-lspgraph-core = { path = "../lspgraph-core" }
+lspgraph-core = { path = "../lspgraph-core", version = "0.1.0" }
 ratatui = "0.30"
