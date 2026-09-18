@@ -90,17 +90,25 @@ jobs:
           RB
           ruby -c out/Formula/lspgraph.rb
 
+      # A deploy key rather than a personal access token: it grants write to
+      # this one repository and nothing else on the account, and it is the only
+      # credential this workflow holds.
       - name: Push it to the tap
         env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${TAP_TOKEN:-}" ]; then
-            echo "::error::HOMEBREW_TAP_TOKEN is not set; cannot update the tap"
+          if [ -z "${DEPLOY_KEY:-}" ]; then
+            echo "::error::HOMEBREW_TAP_DEPLOY_KEY is not set; cannot update the tap"
             exit 1
           fi
-          git clone --depth 1 \
-            "https://x-access-token:${TAP_TOKEN}@github.com/kpanuragh/homebrew-tap.git" tap
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/tap_key
+          chmod 600 ~/.ssh/tap_key
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap_key -o IdentitiesOnly=yes"
+
+          git clone --depth 1 git@github.com:kpanuragh/homebrew-tap.git tap
           cp out/Formula/lspgraph.rb tap/Formula/lspgraph.rb
           cd tap
           if git diff --quiet; then
